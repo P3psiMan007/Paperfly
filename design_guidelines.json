@@ -1,0 +1,76 @@
+{
+  "theme": "Light",
+  "archetype": "3 (Pastel & Soft) + Neo-Brutalist Game UI Twist",
+  "domain": "Mobile Game",
+  "instructions_to_main_agent": "Implement a 2.5D flying game 'Mr. Maybe Flight' using React Native (Expo) and canvas-style rendering or SVGs. Follow the high-contrast Neo-brutalist UI style for menus paired with a dreamy, soft pastel game world. Prioritize responsive tilt controls using Expo sensors (gyroscope) and smooth spring animations for UI.",
+  "colors": {
+    "background_gradient": ["#FFDEE9", "#B5FFFC"],
+    "primary": "#FFFFFF",
+    "accent_ring": "#FDE047",
+    "danger_obstacle": "#FCA5A5",
+    "text_main": "#0F172A",
+    "ui_glass": "rgba(255, 255, 255, 0.3)"
+  },
+  "typography": {
+    "font_family": "Outfit",
+    "rules": {
+      "headings": "font-black tracking-tighter",
+      "labels": "text-xs font-bold uppercase tracking-[0.2em]",
+      "score": "text-5xl font-black text-white drop-shadow-md"
+    }
+  },
+  "layouts_and_grids": {
+    "menus": "flex-col items-center justify-center space-y-8 p-8",
+    "hud": "absolute top-12 left-0 right-0 px-6 flex justify-between items-start z-50",
+    "safe_area": "Ensure padding matches device safe areas"
+  },
+  "visual_enhancers": {
+    "glassmorphism": "Use backdrop-blur-xl bg-white/30 border-white/50 border rounded-3xl for HUD elements and menu containers.",
+    "neo_brutalism": "Use harsh 2px borders (border-slate-900) and hard shadows (shadow-[0_4px_0_0_#0f172a]) on interactive buttons.",
+    "shadows": "Text elements over the game canvas must have drop-shadow for visibility."
+  },
+  "components_and_styles": {
+    "primary_button": "bg-white text-slate-900 border-2 border-slate-900 shadow-[0_4px_0_0_#0f172a] rounded-2xl px-8 py-4 font-black uppercase text-xl active:translate-y-1 active:shadow-[0_0px_0_0_#0f172a]",
+    "hud_pill": "backdrop-blur-md bg-white/20 border border-white/40 rounded-full px-4 py-2 flex items-center gap-2 text-slate-900 font-bold",
+    "slider": "Track should be thick, thumb should be a white circle with a 2px slate border"
+  },
+  "game_visuals_and_sprites": {
+    "paper_plane": "Origami style, pure white with sharp slate outlines. Rendered top-down or slight isometric.",
+    "collectible_rings": "Golden yellow torus, soft glow, bobbing animation.",
+    "obstacles": "Abstract pastel blocks or storm clouds.",
+    "environment": "Parallax scrolling pastel clouds in the background."
+  },
+  "motion_and_interaction": {
+    "ui_entrance": "Spring physics for menu screens sliding in.",
+    "plane_movement": "Smooth interpolation based on gyroscope data. Plane tilts visibly based on orientation.",
+    "boost_effect": "Speed lines around edges, slight FOV increase on tap-and-hold.",
+    "ring_collection": "Ring scales up rapidly and fades out."
+  },
+  "accessibility": {
+    "contrast": "Ensure text over glass panels has sufficient contrast. Use drop-shadows on HUD text.",
+    "touch_targets": "Minimum 48x48px for all interactive elements.",
+    "motion": "Provide an option to reduce screen shake in settings."
+  },
+  "image_urls": [
+    {
+      "url": "https://images.unsplash.com/photo-1759240837736-29a76e7e5076?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODF8MHwxfHNlYXJjaHwyfHxtaW5pbWFsaXN0JTIwc3Vuc2V0JTIwc2t5JTIwY2xvdWRzJTIwcGFzdGVsfGVufDB8fHx8MTc3NzIxNDk5NHww&ixlib=rb-4.1.0&q=85",
+      "category": "background",
+      "description": "Dreamy pastel sunset sky to be used as a reference or direct asset for the scrolling parallax background."
+    },
+    {
+      "url": "https://images.pexels.com/photos/5573105/pexels-photo-5573105.jpeg",
+      "category": "visual_reference",
+      "description": "Secondary reference for cloud coloring and atmospheric depth."
+    }
+  ],
+  "testing_attributes": {
+    "start_button": "data-testid='start-game-button'",
+    "calibrate_button": "data-testid='calibrate-button'",
+    "restart_button": "data-testid='restart-button'",
+    "sensitivity_slider": "data-testid='sensitivity-slider'",
+    "score_display": "data-testid='score-display'",
+    "speed_indicator": "data-testid='speed-indicator'",
+    "tilt_indicator": "data-testid='tilt-indicator'",
+    "boost_active": "data-testid='boost-active'"
+  }
+}
