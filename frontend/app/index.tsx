@@ -153,9 +153,6 @@ const styles = StyleSheet.create({
     color: "#FDE047",
     letterSpacing: -2,
     lineHeight: 58,
-    textShadowColor: "#0F172A",
-    textShadowOffset: { width: 2, height: 2 },
-    textShadowRadius: 0,
   },
   planeBox: {
     alignItems: "center",
@@ -196,11 +193,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 10,
-    shadowColor: "#0F172A",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
-    elevation: 0,
   },
   primaryBtnText: {
     color: "#0F172A",
