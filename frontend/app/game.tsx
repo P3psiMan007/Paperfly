@@ -90,26 +90,25 @@ export default function Game() {
     loadHighScore().then(setHighScore);
   }, []);
 
-  // Sensor subscription
+  // Sensor subscription — prefer DeviceMotion (gravity-compensated, more stable)
+  // and only fall back to Accelerometer if DeviceMotion is unavailable.
+  // This avoids both sensors writing into the same ref and fighting each other.
   useEffect(() => {
     let accelSub: any = null;
     let dmSub: any = null;
     let cancelled = false;
 
     (async () => {
+      let dmAvailable = false;
       try {
-        const ok = await Accelerometer.isAvailableAsync();
-        if (!cancelled && ok) {
-          Accelerometer.setUpdateInterval(16);
-          accelSub = Accelerometer.addListener(({ x, y }) => {
-            rawTiltRef.current = { roll: x, pitch: y };
-          });
-        }
-      } catch {}
-      try {
-        const ok = await DeviceMotion.isAvailableAsync();
-        if (!cancelled && ok) {
-          DeviceMotion.setUpdateInterval(16);
+        dmAvailable = await DeviceMotion.isAvailableAsync();
+      } catch {
+        dmAvailable = false;
+      }
+
+      if (dmAvailable) {
+        try {
+          DeviceMotion.setUpdateInterval(33); // ~30 Hz, smoother
           dmSub = DeviceMotion.addListener((data: any) => {
             const r = data?.rotation;
             if (r) {
@@ -117,6 +116,18 @@ export default function Game() {
               const pitch = Math.max(-1, Math.min(1, (r.beta || 0) / 0.7));
               rawTiltRef.current = { roll, pitch };
             }
+          });
+          return;
+        } catch {}
+      }
+
+      // Fallback: accelerometer
+      try {
+        const ok = await Accelerometer.isAvailableAsync();
+        if (!cancelled && ok) {
+          Accelerometer.setUpdateInterval(33);
+          accelSub = Accelerometer.addListener(({ x, y }) => {
+            rawTiltRef.current = { roll: x, pitch: y };
           });
         }
       } catch {}
@@ -215,13 +226,28 @@ export default function Game() {
       if (stateRef.current === "playing") {
         const raw = rawTiltRef.current;
         const cal = calibRef.current;
-        const targetRoll = Math.max(-1, Math.min(1, raw.roll - cal.roll));
-        const targetPitch = Math.max(-1, Math.min(1, raw.pitch - cal.pitch));
-        const smoothing = 0.18;
+
+        // Apply dead zone to ignore micro-jitter (sensor noise / hand tremor)
+        const DEAD_ZONE = 0.06;
+        const applyDeadZone = (v: number) => {
+          if (Math.abs(v) < DEAD_ZONE) return 0;
+          // Re-scale so output starts smoothly from 0 past the dead zone
+          const sign = v < 0 ? -1 : 1;
+          return sign * ((Math.abs(v) - DEAD_ZONE) / (1 - DEAD_ZONE));
+        };
+
+        const rawRoll = applyDeadZone(raw.roll - cal.roll);
+        const rawPitch = applyDeadZone(raw.pitch - cal.pitch);
+        const targetRoll = Math.max(-1, Math.min(1, rawRoll));
+        const targetPitch = Math.max(-1, Math.min(1, rawPitch));
+
+        // Heavier smoothing on pitch (vertical) to kill jitter; roll stays responsive.
+        const SMOOTH_ROLL = 0.18;
+        const SMOOTH_PITCH = 0.07;
         smoothTiltRef.current.roll +=
-          (targetRoll - smoothTiltRef.current.roll) * smoothing;
+          (targetRoll - smoothTiltRef.current.roll) * SMOOTH_ROLL;
         smoothTiltRef.current.pitch +=
-          (targetPitch - smoothTiltRef.current.pitch) * smoothing;
+          (targetPitch - smoothTiltRef.current.pitch) * SMOOTH_PITCH;
 
         const target = boostRef.current
           ? BOOST_SPEED
