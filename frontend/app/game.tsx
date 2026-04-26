@@ -15,6 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Accelerometer, DeviceMotion } from "expo-sensors";
 import * as Haptics from "expo-haptics";
 import PaperPlane from "../src/PaperPlane";
+import Cloud from "../src/Cloud";
 import {
   loadCalibration,
   saveCalibration,
@@ -79,6 +80,8 @@ export default function Game() {
   const cloudOffsetRef = useRef(0);
 
   const [, setTick] = useState(0);
+  const [crashFlash, setCrashFlash] = useState(false);
+  const popupsRef = useRef<{ id: number; value: number; t: number }[]>([]);
 
   useEffect(() => {
     stateRef.current = state;
@@ -261,6 +264,13 @@ export default function Game() {
         cloudOffsetRef.current =
           (cloudOffsetRef.current + speedRef.current * dt * 0.4) % 1000;
 
+        // Cleanup old score popups (>1s)
+        if (popupsRef.current.length) {
+          popupsRef.current = popupsRef.current.filter(
+            (p) => now - p.t < 1000
+          );
+        }
+
         lastSpawnRef.current += dt;
         if (lastSpawnRef.current >= 0.55) {
           lastSpawnRef.current = 0;
@@ -303,12 +313,19 @@ export default function Game() {
                 o.collected = true;
                 collectedRingsRef.current += 1;
                 scoreRef.current += 50;
+                popupsRef.current.push({
+                  id: nextId++,
+                  value: 50,
+                  t: now,
+                });
                 if (Platform.OS !== "web") {
                   Haptics.impactAsync(
                     Haptics.ImpactFeedbackStyle.Light
                   ).catch(() => {});
                 }
               } else {
+                setCrashFlash(true);
+                setTimeout(() => setCrashFlash(false), 280);
                 endGame();
                 break;
               }
@@ -384,21 +401,23 @@ export default function Game() {
       const size = o.baseSize * scale;
       const opacity = Math.min(1, (FAR_Z - o.z) / 600);
       if (o.type === "ring") {
+        const pulse = 1 + Math.sin(performance.now() / 220 + o.id) * 0.06;
+        const rsize = size * pulse;
         return (
           <View
             key={o.id}
-            pointerEvents="none"
             style={[
               styles.ring,
               {
-                left: sx - size / 2,
-                top: sy - size / 2,
-                width: size,
-                height: size,
-                borderRadius: size / 2,
-                borderWidth: Math.max(3, size * 0.18),
+                left: sx - rsize / 2,
+                top: sy - rsize / 2,
+                width: rsize,
+                height: rsize,
+                borderRadius: rsize / 2,
+                borderWidth: Math.max(3, rsize * 0.18),
                 borderColor: o.hue,
                 opacity: 0.55 + 0.45 * opacity,
+                pointerEvents: "none",
               },
             ]}
           />
@@ -407,7 +426,6 @@ export default function Game() {
       return (
         <View
           key={o.id}
-          pointerEvents="none"
           style={[
             styles.obstacle,
             {
@@ -418,6 +436,7 @@ export default function Game() {
               borderRadius: size * 0.18,
               backgroundColor: o.hue,
               opacity: 0.55 + 0.45 * opacity,
+              pointerEvents: "none",
             },
           ]}
         />
@@ -457,7 +476,7 @@ export default function Game() {
         SH={SH}
       />
 
-      <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      <View style={[StyleSheet.absoluteFill, { pointerEvents: "none" }]}>
         {renderedObjects}
       </View>
 
@@ -470,9 +489,9 @@ export default function Game() {
           {
             left: planeScreenX - PLANE_SIZE / 2,
             top: planeScreenY - PLANE_SIZE / 2,
+            pointerEvents: "none",
           },
         ]}
-        pointerEvents="none"
       >
         <View style={styles.planeHalo} />
         <PaperPlane size={PLANE_SIZE} tilt={tiltX} pitch={-tiltY} />
@@ -487,9 +506,26 @@ export default function Game() {
         />
       )}
 
+      {/* Crash flash */}
+      {crashFlash && (
+        <View
+          style={[
+            StyleSheet.absoluteFill,
+            {
+              backgroundColor: "rgba(252,165,165,0.55)",
+              pointerEvents: "none",
+            },
+          ]}
+        />
+      )}
+
       {/* HUD */}
-      <SafeAreaView style={styles.hudSafe} pointerEvents="box-none">
-        <View style={styles.hudTop} pointerEvents="box-none">
+      <SafeAreaView
+        style={[styles.hudSafe, { pointerEvents: "box-none" }]}
+      >
+        <View
+          style={[styles.hudTop, { pointerEvents: "box-none" }]}
+        >
           <View style={styles.hudPill} testID="score-display">
             <Ionicons name="trophy" size={14} color="#0F172A" />
             <Text style={styles.hudText}>{score}</Text>
@@ -518,7 +554,9 @@ export default function Game() {
         </View>
 
         {state === "playing" && (
-          <View style={styles.cornerBtns} pointerEvents="box-none">
+          <View
+            style={[styles.cornerBtns, { pointerEvents: "box-none" }]}
+          >
             <TouchableOpacity
               onPress={() => {
                 setState("paused");
@@ -578,7 +616,9 @@ export default function Game() {
       )}
 
       {calibrating && (
-        <View style={styles.calibrationOverlay} pointerEvents="none">
+        <View
+          style={[styles.calibrationOverlay, { pointerEvents: "none" }]}
+        >
           <Text style={styles.calibrationText}>HOLD STEADY</Text>
           <Text style={styles.calibrationCount}>{calibCountdown}</Text>
         </View>
@@ -662,7 +702,7 @@ function Overlay({
   SW: number;
 }) {
   return (
-    <View style={styles.overlayWrap} pointerEvents="box-none">
+    <View style={[styles.overlayWrap, { pointerEvents: "box-none" }]}>
       <View style={[styles.overlayPanel, { width: SW - 60 }]}>{children}</View>
     </View>
   );
@@ -683,7 +723,7 @@ function TiltIndicator({ tiltX, tiltY }: { tiltX: number; tiltY: number }) {
 function BoostLines({ SW, SH }: { SW: number; SH: number }) {
   const lines = Array.from({ length: 10 });
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+    <View style={[StyleSheet.absoluteFill, { pointerEvents: "none" }]}>
       {lines.map((_, i) => {
         const side = i % 2 === 0 ? -1 : 1;
         const top = 60 + ((i * 73) % (SH - 200));
@@ -724,7 +764,7 @@ function ParallaxClouds({
     { speed: 1.0, y: SH * 0.78, size: 130, count: 3, opacity: 0.8 },
   ];
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+    <View style={[StyleSheet.absoluteFill, { pointerEvents: "none" }]}>
       {layers.map((layer, li) =>
         Array.from({ length: layer.count }).map((_, i) => {
           const spacing = SW / layer.count + 80;
@@ -765,6 +805,14 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(15,23,42,0.18)",
   },
   cloud: { position: "absolute", backgroundColor: "#FFFFFF" },
+  scorePopup: {
+    position: "absolute",
+    width: 60,
+    textAlign: "center",
+    fontSize: 22,
+    fontWeight: "900",
+    color: "#FDE047",
+  },
   planeWrap: {
     position: "absolute",
     width: PLANE_SIZE,
