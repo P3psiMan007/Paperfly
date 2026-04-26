@@ -1,0 +1,37 @@
+{
+  "summary": "Frontend (Expo web) tested at mobile viewport 390x844. Home (/) and Settings (/settings) render and function correctly with all expected testIDs. CRITICAL: navigating to /game throws an uncaught TypeError 'this._nativeModule.addListener is not a function' from Accelerometer.addListener, crashing the Game screen and showing a React Native red-screen via LogBox. As a result, the Ready overlay, HUD, boost, pause, calibration countdown, restart, and quit flows are all unreachable on web preview.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "app/game.tsx (Accelerometer subscription)", "issue": "Accelerometer.addListener throws on web because the native module is not implemented; the listener is registered unconditionally inside useEffect, which crashes the Game screen on the web preview and renders a red error overlay. Guard with Platform.OS !== 'web' (or await Accelerometer.isAvailableAsync() and try/catch) before calling setUpdateInterval/addListener. Same applies to DeviceMotion (already guarded) - apply identical guard for Accelerometer.", "testID": "ready-start-button (unreachable)", "priority": "CRITICAL"}
+    ],
+    "integration_issues": [
+      {"flow": "Start Game / Calibrate shortcut / Recalibrate Now -> /game", "issue": "All three navigations land on a crashed Game screen due to the Accelerometer error above. Ready overlay never renders, so FLY/Calibrate/HUD/Pause/Quit/Retry cannot be exercised on web.", "affected_testIDs": ["ready-start-button","calibrate-button","score-display","tilt-indicator","speed-indicator","pause-button","resume-button","quit-button","restart-button","home-button","boost-active","touch-capture"]}
+    ],
+    "design_issues": [
+      {"screen": "index", "issues": ["Floating cloud decoration overlaps the 'Mr. Maybe Flight' title at small viewports (cloud at top:80,left:30 sits on top of the second word). Consider lowering z-order or repositioning."]}
+    ],
+    "react_native_issues": [
+      {"component": "global", "issue": "Deprecation warnings: 'shadow*' and 'textShadow*' style props deprecated -> use boxShadow/textShadow; props.pointerEvents deprecated -> use style.pointerEvents (in game.tsx Overlay/HUD/SafeAreaView)."}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Fix Accelerometer crash on web in app/game.tsx: wrap setUpdateInterval+addListener in `if (Platform.OS !== 'web')` or use try/catch around Accelerometer.isAvailableAsync(). This blocks all gameplay testing on web preview.",
+    "After fix, retest: Ready overlay -> FLY, Calibrate countdown (HOLD STEADY 3-2-1), HUD (score increments, tilt-indicator, speed-indicator), tap-and-hold boost badge, Pause/Resume/Quit, RETRY/Home on game over.",
+    "Replace deprecated style props (shadow*, textShadow*, pointerEvents prop) to silence warnings.",
+    "Adjust home cloud decoration so it does not overlap the title."
+  ],
+  "critical_code_review_comments": [
+    "game.tsx line 106-110: Accelerometer.setUpdateInterval/addListener called without web/availability guard - causes red-screen on web.",
+    "game.tsx: Overlay and several Views use prop `pointerEvents` instead of style.pointerEvents (deprecated in RN Web).",
+    "index.tsx & game.tsx use shadow*/textShadow* props - deprecated, use boxShadow/textShadow."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A", "frontend": "~40% (home + settings OK; game screen crashes on load)"},
+  "seed_data_creation": "None",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Reproduce by visiting EXPO_BACKEND_URL on a 390x844 viewport, tap START GAME (or Calibrate, or Settings>Recalibrate Now). The /game route immediately throws TypeError from Accelerometer.addListener. Once main agent guards Accelerometer for web, exercise: ready-start-button, calibrate-button (verify HOLD STEADY + 3-2-1), score-display auto-increments, tap-and-hold on touch-capture shows boost-active, pause-button -> resume-button/quit-button, calibrate-shortcut from home triggers auto-calibrate.",
+  "rca_of_issue": "expo-sensors Accelerometer is not implemented for web in this Expo SDK; calling addListener throws. The DeviceMotion path is already guarded via isAvailableAsync, but the Accelerometer path is invoked unconditionally. Fix: gate Accelerometer setup with Platform.OS !== 'web' or wrap in try/catch around isAvailableAsync(), mirroring the DeviceMotion pattern."
+}
