@@ -1,0 +1,27 @@
+{
+  "summary": "Iteration 2 retest at 390x844 viewport. Critical Accelerometer crash on /game is FIXED — Accelerometer.addListener is now wrapped in isAvailableAsync()+try/catch (mirrors DeviceMotion guard). All previously-blocked flows now work: Ready overlay (FLY + Calibrate), playing state with HUD (score-display, tilt-indicator, speed-indicator, pause-button, touch-capture), tap-and-hold boost (boost-active badge appears on mousedown and clears on mouseup), Pause overlay with Resume/Quit (Resume restores playing, Quit navigates to /), and Calibrate flow shows 'HOLD STEADY' overlay during countdown then dismisses. Cloud-vs-title overlap is fixed: 'Flight' rect = y[120,178], first cloud at y[240,290] — no overlap.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "game.tsx Overlay/HUD/inner Views", "issue": "Deprecation warnings still present: shadow*/textShadow* style props -> use boxShadow/textShadow; props.pointerEvents -> use style.pointerEvents. Non-blocking but should be cleaned up."}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "(Optional / non-blocking) Replace deprecated RN Web style props (shadow*, textShadow*, pointerEvents prop) with boxShadow/textShadow and style.pointerEvents to silence console warnings."
+  ],
+  "critical_code_review_comments": [
+    "game.tsx (lines 102-143): Accelerometer + DeviceMotion subscriptions are now correctly guarded with isAvailableAsync()+try/catch and properly cleaned up via cancelled flag. Good.",
+    "index.tsx clouds repositioned to top:240/320 — no longer overlap title at 390px width."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A", "frontend": "100% on requested retest items"},
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "All Iteration 2 items pass on web preview. On web, sensors return no data so plane sits at center; obstacles still spawn and can collide randomly causing gameover after ~10-20s — this is expected gameplay, not a bug. Verified flows: home -> /game -> Ready overlay -> FLY -> HUD (score increments, tilt, speed) -> tap-hold for boost-active -> pause -> resume -> pause -> quit -> home; and Calibrate -> HOLD STEADY 3..2..1 -> dismiss. Title/cloud overlap resolved. Only remaining items are cosmetic deprecation warnings.",
+  "rca_of_issue": "Previous iteration crash: expo-sensors Accelerometer was called unconditionally; on web the native module is missing so addListener threw 'this._nativeModule.addListener is not a function'. Fix in game.tsx wraps it in `await Accelerometer.isAvailableAsync()` inside try/catch, identical to DeviceMotion path. Verified by visiting /game without red-screen and confirming all gameplay testIDs render."
+}

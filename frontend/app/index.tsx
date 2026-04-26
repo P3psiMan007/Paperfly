@@ -40,11 +40,11 @@ export default function Index() {
     >
       <SafeAreaView style={styles.safe}>
         {/* Floating clouds decoration */}
-        <View style={[styles.cloud, { top: 80, left: 30, opacity: 0.85 }]} />
+        <View style={[styles.cloud, { top: 240, left: 30, opacity: 0.85 }]} />
         <View
           style={[
             styles.cloud,
-            { top: 160, right: 20, opacity: 0.7, transform: [{ scale: 0.7 }] },
+            { top: 320, right: 20, opacity: 0.7, transform: [{ scale: 0.7 }] },
           ]}
         />
         <View

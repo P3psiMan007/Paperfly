@@ -102,33 +102,41 @@ export default function Game() {
   useEffect(() => {
     let accelSub: any = null;
     let dmSub: any = null;
+    let cancelled = false;
 
-    Accelerometer.setUpdateInterval(16);
-    accelSub = Accelerometer.addListener(({ x, y }) => {
-      // x: roll (-1..1), y: pitch
-      rawTiltRef.current = { roll: x, pitch: y };
-    });
+    const trySubscribe = async () => {
+      // Accelerometer (guarded for web/unavailable)
+      try {
+        const accelOk = await Accelerometer.isAvailableAsync();
+        if (!cancelled && accelOk) {
+          Accelerometer.setUpdateInterval(16);
+          accelSub = Accelerometer.addListener(({ x, y }) => {
+            rawTiltRef.current = { roll: x, pitch: y };
+          });
+        }
+      } catch {}
 
-    // Try DeviceMotion as well (more accurate on real devices)
-    if (DeviceMotion && DeviceMotion.isAvailableAsync) {
-      DeviceMotion.isAvailableAsync()
-        .then((ok) => {
-          if (!ok) return;
+      // DeviceMotion (fallback / more accurate on real devices)
+      try {
+        const dmOk = await DeviceMotion.isAvailableAsync();
+        if (!cancelled && dmOk) {
           DeviceMotion.setUpdateInterval(16);
-          dmSub = DeviceMotion.addListener((data) => {
-            const r = data.rotation;
+          dmSub = DeviceMotion.addListener((data: any) => {
+            const r = data?.rotation;
             if (r) {
-              // beta = pitch [-pi..pi], gamma = roll [-pi/2..pi/2]
               const roll = Math.max(-1, Math.min(1, (r.gamma || 0) / 0.7));
               const pitch = Math.max(-1, Math.min(1, (r.beta || 0) / 0.7));
               rawTiltRef.current = { roll, pitch };
             }
           });
-        })
-        .catch(() => {});
-    }
+        }
+      } catch {}
+    };
+
+    trySubscribe();
 
     return () => {
+      cancelled = true;
       if (accelSub) accelSub.remove();
       if (dmSub) dmSub.remove();
     };
