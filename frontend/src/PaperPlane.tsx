@@ -7,12 +7,14 @@ type Props = {
   pitch?: number; // -1..1 for pitch visual
 };
 
-// Origami-style paper plane built from layered triangle Views.
+// Origami-style paper plane: two stacked triangles + a small tail fin.
+// Built entirely from styled Views so it works on iOS / Android / web.
 export default function PaperPlane({ size = 80, tilt = 0, pitch = 0 }: Props) {
-  const rotateZ = `${tilt * 25}deg`;
-  const rotateX = `${pitch * 15}deg`;
+  const rotateZ = `${tilt * 22}deg`;
+  const rotateX = `${pitch * 14}deg`;
   const w = size;
-  const h = size * 0.9;
+  const h = size;
+
   return (
     <View
       style={[
@@ -24,47 +26,61 @@ export default function PaperPlane({ size = 80, tilt = 0, pitch = 0 }: Props) {
         },
       ]}
     >
-      {/* Shadow */}
+      {/* Soft drop shadow under plane */}
       <View
         style={[
           styles.shadow,
-          { width: w * 0.6, height: h * 0.18, top: h * 0.95 },
+          {
+            width: w * 0.55,
+            height: w * 0.12,
+            top: h * 0.92,
+            left: (w - w * 0.55) / 2,
+          },
         ]}
       />
-      {/* Right wing (darker) */}
+
+      {/* Main body: large white triangle pointing UP (nose up) */}
       <View
         style={[
-          styles.wingRight,
+          styles.bodyTri,
+          {
+            borderLeftWidth: w * 0.5,
+            borderRightWidth: w * 0.5,
+            borderBottomWidth: h * 0.95,
+          },
+        ]}
+      />
+
+      {/* Right wing shadow (slightly darker triangle on right half) */}
+      <View
+        style={[
+          styles.wingShadow,
           {
             borderLeftWidth: w * 0.5,
             borderRightWidth: 0,
-            borderBottomWidth: h,
+            borderBottomWidth: h * 0.95,
           },
         ]}
       />
-      {/* Left wing (lighter) */}
+
+      {/* Center fold line (nose to tail) */}
       <View
         style={[
-          styles.wingLeft,
-          {
-            borderLeftWidth: 0,
-            borderRightWidth: w * 0.5,
-            borderBottomWidth: h,
-          },
+          styles.fold,
+          { height: h * 0.95, left: w * 0.5 - 1 },
         ]}
       />
-      {/* Center fold line */}
-      <View style={[styles.fold, { height: h * 0.95, left: w * 0.5 - 0.75 }]} />
-      {/* Tail accent triangle */}
+
+      {/* Tail fin: small dark triangle at bottom-center */}
       <View
         style={[
-          styles.tail,
+          styles.tailFin,
           {
-            borderLeftWidth: w * 0.18,
-            borderRightWidth: w * 0.18,
-            borderBottomWidth: h * 0.32,
-            top: h * 0.55,
-            left: w * 0.5 - w * 0.18,
+            borderLeftWidth: w * 0.16,
+            borderRightWidth: w * 0.16,
+            borderTopWidth: h * 0.22,
+            top: h * 0.78,
+            left: w * 0.5 - w * 0.16,
           },
         ]}
       />
@@ -80,51 +96,47 @@ const styles = StyleSheet.create({
   },
   shadow: {
     position: "absolute",
-    backgroundColor: "rgba(15,23,42,0.18)",
+    backgroundColor: "rgba(15,23,42,0.22)",
     borderRadius: 999,
   },
-  wingLeft: {
+  bodyTri: {
     position: "absolute",
-    left: 0,
     top: 0,
     width: 0,
     height: 0,
-    backgroundColor: "transparent",
     borderStyle: "solid",
     borderLeftColor: "transparent",
-    borderRightColor: "#FFFFFF",
-    borderBottomColor: "transparent",
-    borderTopColor: "transparent",
+    borderRightColor: "transparent",
+    borderBottomColor: "#FFFFFF",
   },
-  wingRight: {
+  wingShadow: {
     position: "absolute",
-    right: 0,
     top: 0,
+    left: "50%",
     width: 0,
     height: 0,
-    backgroundColor: "transparent",
     borderStyle: "solid",
-    borderLeftColor: "#E2E8F0",
+    borderLeftColor: "#CBD5E1",
     borderRightColor: "transparent",
     borderBottomColor: "transparent",
     borderTopColor: "transparent",
   },
   fold: {
     position: "absolute",
-    width: 1.5,
+    width: 2,
     backgroundColor: "#0F172A",
     top: 0,
-    opacity: 0.55,
+    opacity: 0.85,
   },
-  tail: {
+  tailFin: {
     position: "absolute",
     width: 0,
     height: 0,
-    backgroundColor: "transparent",
     borderStyle: "solid",
     borderLeftColor: "transparent",
     borderRightColor: "transparent",
-    borderBottomColor: "#CBD5E1",
-    borderTopColor: "transparent",
+    borderTopColor: "#0F172A",
+    borderBottomColor: "transparent",
+    opacity: 0.9,
   },
 });

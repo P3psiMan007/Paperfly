@@ -1,0 +1,61 @@
+{
+  "summary": "Frontend-only regression for Mr. Maybe Flight (Expo SDK 54 web preview, mobile viewport 375x667). All 10 user-facing flows pass. Critical user bugs from prior iterations are fixed: NO 'AsyncStorage Native module is null' anywhere in console, paper plane is rendered at ~62% screen height with white halo (NOT clipped at top), and Calibrate triggers HOLD STEADY 3-2-1 silent countdown. The only remaining defect is that the requirement 'No deprecation warnings about shadow*/textShadow* in console' is NOT met — those style props are still present in app/index.tsx and emit RN-Web deprecation warnings on every load.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "app/index.tsx",
+        "issue": "Console still emits 'textShadow* style props are deprecated. Use textShadow.' — caused by styles.titleAccent (textShadowColor/textShadowOffset/textShadowRadius) on the 'Flight' title. Main agent's iteration-3 note claims these were removed but they were not removed from index.tsx.",
+        "testID": "n/a (titleAccent style)",
+        "priority": "MEDIUM"
+      },
+      {
+        "component": "app/index.tsx",
+        "issue": "Console still emits 'shadow* style props are deprecated. Use boxShadow.' — caused by styles.primaryBtn (shadowColor/shadowOffset/shadowOpacity/shadowRadius) on the START GAME button. Replace with boxShadow string for web compat or wrap in Platform.select.",
+        "testID": "start-game-button",
+        "priority": "MEDIUM"
+      },
+      {
+        "component": "multiple (game.tsx, settings.tsx)",
+        "issue": "RN-Web warning 'props.pointerEvents is deprecated. Use style.pointerEvents'. Several <View pointerEvents=\"none\"/> / 'box-none' usages. Not blocking but pollutes console.",
+        "testID": "n/a",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "verified_flows": [
+    "Home (/) loads, no red-screen, BEST SCORE card + START GAME / Settings / Calibrate buttons render",
+    "/game loads with Ready overlay; calibrate-button + ready-start-button + ready-back present",
+    "Paper plane sprite rendered at top=375.5 / window 667 -> center y ≈ 413.5 px (≈62% of screen height) with visible white halo backdrop. NOT clipped at top.",
+    "Calibrate button → HOLD STEADY overlay shows, 3-2-1 countdown completes, overlay dismisses, no console error, calibration saved silently",
+    "FLY → playing state with score-display, tilt-indicator, speed-indicator, pause-button, touch-capture all visible",
+    "Mouse-down on touch-capture → boost-active badge appears (BOOST pill)",
+    "pause-button → resume-button + quit-button visible; Resume returns to playing",
+    "pause-button → quit-button → URL navigates from /game back to / (home re-renders)",
+    "Settings: sensitivity-slider draggable (set to 0.70x then 2.20x without crash); persists across home↔settings navigation",
+    "Reset High Score (reset-highscore) press: no console error, value remains 0",
+    "No 'AsyncStorage Native module is null' or any AsyncStorage error in console anywhere",
+    "All routes (/, /game, /settings) load with no red-screen errors"
+  ],
+  "test_report_links": ["/app/test_reports/iteration_3.json"],
+  "action_items": [
+    "Remove textShadowColor/textShadowOffset/textShadowRadius from styles.titleAccent in /app/frontend/app/index.tsx (or convert to a plain text since it's already styled in yellow with bold weight)",
+    "Remove shadowColor/shadowOffset/shadowOpacity/shadowRadius/elevation from styles.primaryBtn in /app/frontend/app/index.tsx (these were missed during the iteration-3 cleanup)",
+    "(Optional / low priority) Migrate remaining `pointerEvents` JSX props to `style={{pointerEvents:'...'}}` to silence the third RN-Web deprecation warning"
+  ],
+  "critical_code_review_comments": [
+    "iteration-3 PR claim 'Removed shadow*/textShadow* style props from buttons/overlays' is incomplete — index.tsx still has them on titleAccent and primaryBtn.",
+    "src/storage.ts try/catch wrapping is correctly applied — calibration/sensitivity/highscore all swallow errors. Good.",
+    "game.tsx correctly switched to useWindowDimensions(); plane anchor SH * 0.62 confirmed visually."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "91% (10/11 acceptance criteria fully met; only #11 'no shadow/textShadow deprecation warnings' fails)"},
+  "seed_data_creation": "none",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Public preview URL: https://flying-game-demo-1.preview.emergentagent.com (frontend uses EXPO_PUBLIC_BACKEND_URL, backend untouched this iteration). expo-router on web mounts both the prior and current screen as siblings, so testID queries can find duplicates after navigation; prefer URL assertion (page.url) over is_visible checks when verifying navigation. expo-sensors logs harmless 'setUpdateInterval not supported on web' — expected and not a bug.",
+  "rca_of_issue": "Deprecation warnings: titleAccent in index.tsx uses textShadowColor/Offset/Radius which RN 0.81+ web flags as deprecated; primaryBtn uses shadow*. Iteration-3 cleanup removed these from game.tsx but missed index.tsx. Fix: delete those 4-5 style keys (titleAccent: textShadow*; primaryBtn: shadowColor/Offset/Opacity/Radius/elevation) — visual impact on web is negligible since shadows weren't rendering reliably anyway."
+}

@@ -4,8 +4,7 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Dimensions,
-  Pressable,
+  useWindowDimensions,
   PanResponder,
   Platform,
 } from "react-native";
@@ -25,18 +24,16 @@ import {
   Calibration,
 } from "../src/storage";
 
-const { width: SW, height: SH } = Dimensions.get("window");
-
 // World/projection constants
 const FOCAL = 320;
 const FAR_Z = 1100;
 const SPAWN_Z = 1000;
-const PLANE_SIZE = 80;
-const BASE_SPEED = 380; // world units per second
+const PLANE_SIZE = 76;
+const BASE_SPEED = 380;
 const BOOST_SPEED = 680;
 const BRAKE_SPEED = 180;
-const PLANE_X_RANGE = 220; // max world-x offset from tilt
-const PLANE_Y_RANGE = 170; // max world-y offset from tilt
+const PLANE_X_RANGE = 220;
+const PLANE_Y_RANGE = 170;
 
 type WorldObj = {
   id: number;
@@ -44,7 +41,7 @@ type WorldObj = {
   x: number;
   y: number;
   z: number;
-  baseSize: number; // world-units radius
+  baseSize: number;
   collected?: boolean;
   hue?: string;
 };
@@ -56,6 +53,7 @@ let nextId = 1;
 export default function Game() {
   const router = useRouter();
   const params = useLocalSearchParams<{ calibrate?: string }>();
+  const { width: SW, height: SH } = useWindowDimensions();
 
   const [state, setState] = useState<GameState>("ready");
   const [score, setScore] = useState(0);
@@ -65,11 +63,10 @@ export default function Game() {
   const [calibrating, setCalibrating] = useState(false);
   const [calibCountdown, setCalibCountdown] = useState(3);
 
-  // Refs for high-frequency updates
   const sensRef = useRef(1.0);
   const calibRef = useRef<Calibration>({ pitch: 0, roll: 0 });
-  const rawTiltRef = useRef({ pitch: 0, roll: 0 }); // last raw reading
-  const smoothTiltRef = useRef({ pitch: 0, roll: 0 }); // filtered tilt -1..1
+  const rawTiltRef = useRef({ pitch: 0, roll: 0 });
+  const smoothTiltRef = useRef({ pitch: 0, roll: 0 });
   const objectsRef = useRef<WorldObj[]>([]);
   const lastFrameRef = useRef(performance.now());
   const lastSpawnRef = useRef(0);
@@ -79,47 +76,39 @@ export default function Game() {
   const stateRef = useRef<GameState>("ready");
   const scoreRef = useRef(0);
   const collectedRingsRef = useRef(0);
-  const ringScoreFlashRef = useRef<{ x: number; y: number; t: number } | null>(
-    null
-  );
   const cloudOffsetRef = useRef(0);
-  const horizonOffsetRef = useRef(0);
 
-  const [tick, setTick] = useState(0);
+  const [, setTick] = useState(0);
 
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
 
-  // Load preferences
   useEffect(() => {
     loadSensitivity().then((s) => (sensRef.current = s));
     loadCalibration().then((c) => (calibRef.current = c));
     loadHighScore().then(setHighScore);
   }, []);
 
-  // Sensor subscription with smoothing
+  // Sensor subscription
   useEffect(() => {
     let accelSub: any = null;
     let dmSub: any = null;
     let cancelled = false;
 
-    const trySubscribe = async () => {
-      // Accelerometer (guarded for web/unavailable)
+    (async () => {
       try {
-        const accelOk = await Accelerometer.isAvailableAsync();
-        if (!cancelled && accelOk) {
+        const ok = await Accelerometer.isAvailableAsync();
+        if (!cancelled && ok) {
           Accelerometer.setUpdateInterval(16);
           accelSub = Accelerometer.addListener(({ x, y }) => {
             rawTiltRef.current = { roll: x, pitch: y };
           });
         }
       } catch {}
-
-      // DeviceMotion (fallback / more accurate on real devices)
       try {
-        const dmOk = await DeviceMotion.isAvailableAsync();
-        if (!cancelled && dmOk) {
+        const ok = await DeviceMotion.isAvailableAsync();
+        if (!cancelled && ok) {
           DeviceMotion.setUpdateInterval(16);
           dmSub = DeviceMotion.addListener((data: any) => {
             const r = data?.rotation;
@@ -131,9 +120,7 @@ export default function Game() {
           });
         }
       } catch {}
-    };
-
-    trySubscribe();
+    })();
 
     return () => {
       cancelled = true;
@@ -142,7 +129,6 @@ export default function Game() {
     };
   }, []);
 
-  // Refresh sensitivity & calibration on focus (changed from settings)
   useFocusEffect(
     useCallback(() => {
       loadSensitivity().then((s) => (sensRef.current = s));
@@ -151,7 +137,6 @@ export default function Game() {
     }, [])
   );
 
-  // Auto-calibrate if requested via params
   useEffect(() => {
     if (params.calibrate === "1" && state === "ready") {
       setTimeout(() => doCalibrate(), 300);
@@ -174,13 +159,14 @@ export default function Game() {
         saveCalibration(calibRef.current);
         setCalibrating(false);
         if (Platform.OS !== "web") {
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          Haptics.notificationAsync(
+            Haptics.NotificationFeedbackType.Success
+          ).catch(() => {});
         }
       }
     }, 700);
   };
 
-  // Reset world
   const resetWorld = () => {
     objectsRef.current = [];
     scoreRef.current = 0;
@@ -206,12 +192,16 @@ export default function Game() {
     setState("gameover");
     stateRef.current = "gameover";
     if (Platform.OS !== "web") {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Haptics.notificationAsync(
+        Haptics.NotificationFeedbackType.Error
+      ).catch(() => {});
     }
     const finalScore = Math.floor(scoreRef.current);
     if (finalScore > highScore) {
       setHighScore(finalScore);
-      await saveHighScore(finalScore);
+      try {
+        await saveHighScore(finalScore);
+      } catch {}
     }
   };
 
@@ -223,7 +213,6 @@ export default function Game() {
       lastFrameRef.current = now;
 
       if (stateRef.current === "playing") {
-        // ---- Smooth tilt (low-pass filter)
         const raw = rawTiltRef.current;
         const cal = calibRef.current;
         const targetRoll = Math.max(-1, Math.min(1, raw.roll - cal.roll));
@@ -234,7 +223,6 @@ export default function Game() {
         smoothTiltRef.current.pitch +=
           (targetPitch - smoothTiltRef.current.pitch) * smoothing;
 
-        // ---- Speed (boost/brake)
         const target = boostRef.current
           ? BOOST_SPEED
           : brakeRef.current
@@ -242,23 +230,14 @@ export default function Game() {
           : BASE_SPEED;
         speedRef.current += (target - speedRef.current) * 0.08;
 
-        // ---- Score (survival)
         scoreRef.current += dt * (speedRef.current / BASE_SPEED) * 10;
 
-        // ---- Background motion
         cloudOffsetRef.current =
-          (cloudOffsetRef.current + speedRef.current * dt * 0.4) % SW;
-        horizonOffsetRef.current =
-          (horizonOffsetRef.current +
-            smoothTiltRef.current.roll * sensRef.current * 80 * dt) %
-          SW;
+          (cloudOffsetRef.current + speedRef.current * dt * 0.4) % 1000;
 
-        // ---- Spawn objects
         lastSpawnRef.current += dt;
-        const spawnInterval = 0.55;
-        if (lastSpawnRef.current >= spawnInterval) {
+        if (lastSpawnRef.current >= 0.55) {
           lastSpawnRef.current = 0;
-          // 60% ring, 40% obstacle
           const isRing = Math.random() < 0.6;
           objectsRef.current.push({
             id: nextId++,
@@ -271,7 +250,6 @@ export default function Game() {
           });
         }
 
-        // ---- Update objects (z decrease)
         const planeWorldX =
           smoothTiltRef.current.roll * sensRef.current * PLANE_X_RANGE;
         const planeWorldY =
@@ -282,31 +260,26 @@ export default function Game() {
           const o = objs[i];
           o.z -= speedRef.current * dt;
           if (o.z <= 5) {
-            // missed -> remove
             objs.splice(i, 1);
             continue;
           }
-          // Collision check window
           if (!o.collected && o.z < 60) {
             const dx = o.x - planeWorldX;
             const dy = o.y - planeWorldY;
             const distSq = dx * dx + dy * dy;
-            const hitR = o.baseSize * 0.7 + PLANE_SIZE * 0.35;
+            // Slightly forgiving hitbox
+            const hitR = o.baseSize * 0.6 + PLANE_SIZE * 0.3;
             if (distSq < hitR * hitR) {
               if (o.type === "ring") {
                 o.collected = true;
                 collectedRingsRef.current += 1;
                 scoreRef.current += 50;
-                ringScoreFlashRef.current = {
-                  x: SW / 2,
-                  y: SH / 2 - 40,
-                  t: now,
-                };
                 if (Platform.OS !== "web") {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  Haptics.impactAsync(
+                    Haptics.ImpactFeedbackStyle.Light
+                  ).catch(() => {});
                 }
               } else {
-                // crash
                 endGame();
                 break;
               }
@@ -324,9 +297,9 @@ export default function Game() {
     return () => {
       if (raf) cancelAnimationFrame(raf);
     };
-  }, []); // run once
+  }, []);
 
-  // Touch handlers (boost on hold, swipe down to brake)
+  // Touch handlers
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
@@ -339,7 +312,6 @@ export default function Game() {
       },
       onPanResponderMove: (_, g) => {
         if (stateRef.current === "playing" && g.dy > 60 && g.vy > 0.5) {
-          // swipe down -> brake
           boostRef.current = false;
           brakeRef.current = true;
           setBoostActive(false);
@@ -361,23 +333,25 @@ export default function Game() {
     })
   ).current;
 
-  // ---- Render world objects
+  // ---- Render
   const cx = SW / 2;
-  const cy = SH / 2;
+  // Anchor plane at ~62% of screen height (lower-center is the visual focus)
+  const planeAnchorY = SH * 0.62;
   const planeWorldX =
     smoothTiltRef.current.roll * sensRef.current * PLANE_X_RANGE;
   const planeWorldY =
     -smoothTiltRef.current.pitch * sensRef.current * PLANE_Y_RANGE;
   const planeScreenX = cx + smoothTiltRef.current.roll * sensRef.current * 90;
   const planeScreenY =
-    cy + smoothTiltRef.current.pitch * sensRef.current * 60 + 40;
+    planeAnchorY + smoothTiltRef.current.pitch * sensRef.current * 70;
 
   const renderedObjects = objectsRef.current
     .filter((o) => !o.collected && o.z > 5 && o.z < FAR_Z)
     .map((o) => {
       const scale = FOCAL / o.z;
       const sx = cx + (o.x - planeWorldX * 0.4) * scale;
-      const sy = cy + (o.y - planeWorldY * 0.4) * scale + 40 * (1 - scale);
+      const sy =
+        planeAnchorY + (o.y - planeWorldY * 0.4) * scale - (1 - scale) * 80;
       const size = o.baseSize * scale;
       const opacity = Math.min(1, (FAR_Z - o.z) / 600);
       if (o.type === "ring") {
@@ -396,10 +370,6 @@ export default function Game() {
                 borderWidth: Math.max(3, size * 0.18),
                 borderColor: o.hue,
                 opacity: 0.55 + 0.45 * opacity,
-                shadowColor: o.hue,
-                shadowOpacity: 0.9,
-                shadowRadius: size * 0.25,
-                shadowOffset: { width: 0, height: 0 },
               },
             ]}
           />
@@ -418,7 +388,7 @@ export default function Game() {
               height: size * 0.85,
               borderRadius: size * 0.18,
               backgroundColor: o.hue,
-              opacity: 0.5 + 0.5 * opacity,
+              opacity: 0.55 + 0.45 * opacity,
             },
           ]}
         />
@@ -434,7 +404,6 @@ export default function Game() {
 
   return (
     <View style={styles.root}>
-      {/* Sky background */}
       <LinearGradient
         colors={["#FFDEE9", "#FFE3B5", "#B5FFFC"]}
         style={StyleSheet.absoluteFill}
@@ -445,28 +414,27 @@ export default function Game() {
         style={[
           styles.horizon,
           {
-            top: cy - 20 + tiltY * 30,
+            top: SH * 0.55 + tiltY * 30,
             transform: [{ rotate: `${-tiltX * 6}deg` }],
           },
         ]}
       />
 
-      {/* Parallax clouds */}
       <ParallaxClouds
         offset={cloudOffsetRef.current}
         tiltX={tiltX}
         tiltY={tiltY}
+        SW={SW}
+        SH={SH}
       />
 
-      {/* World objects */}
       <View style={StyleSheet.absoluteFill} pointerEvents="none">
         {renderedObjects}
       </View>
 
-      {/* Boost speed lines */}
-      {boostActive && <BoostLines />}
+      {boostActive && <BoostLines SW={SW} SH={SH} />}
 
-      {/* Plane */}
+      {/* Plane (with white halo so it stays visible) */}
       <View
         style={[
           styles.planeWrap,
@@ -477,10 +445,11 @@ export default function Game() {
         ]}
         pointerEvents="none"
       >
+        <View style={styles.planeHalo} />
         <PaperPlane size={PLANE_SIZE} tilt={tiltX} pitch={-tiltY} />
       </View>
 
-      {/* Touch capture layer (only during play) */}
+      {/* Touch capture during play */}
       {state === "playing" && (
         <View
           style={StyleSheet.absoluteFill}
@@ -519,7 +488,6 @@ export default function Game() {
           </View>
         </View>
 
-        {/* Pause + close */}
         {state === "playing" && (
           <View style={styles.cornerBtns} pointerEvents="box-none">
             <TouchableOpacity
@@ -536,17 +504,18 @@ export default function Game() {
         )}
       </SafeAreaView>
 
-      {/* Boost indicator */}
       {boostActive && (
-        <View style={styles.boostBadge} testID="boost-active">
+        <View
+          style={[styles.boostBadge, { left: SW / 2 - 60 }]}
+          testID="boost-active"
+        >
           <Ionicons name="flash" size={14} color="#0F172A" />
           <Text style={styles.boostText}>BOOST</Text>
         </View>
       )}
 
-      {/* Ready overlay */}
       {state === "ready" && (
-        <Overlay>
+        <Overlay SW={SW}>
           <Text style={styles.overlayTitle}>Ready?</Text>
           <Text style={styles.overlaySub}>
             Hold the screen to boost. Tilt to steer.
@@ -579,7 +548,6 @@ export default function Game() {
         </Overlay>
       )}
 
-      {/* Calibration countdown */}
       {calibrating && (
         <View style={styles.calibrationOverlay} pointerEvents="none">
           <Text style={styles.calibrationText}>HOLD STEADY</Text>
@@ -587,9 +555,8 @@ export default function Game() {
         </View>
       )}
 
-      {/* Pause overlay */}
       {state === "paused" && (
-        <Overlay>
+        <Overlay SW={SW}>
           <Text style={styles.overlayTitle}>Paused</Text>
           <View style={styles.overlayBtnRow}>
             <TouchableOpacity
@@ -616,9 +583,8 @@ export default function Game() {
         </Overlay>
       )}
 
-      {/* Game over overlay */}
       {state === "gameover" && (
-        <Overlay>
+        <Overlay SW={SW}>
           <Text style={styles.overlayEyebrow}>CRASHED</Text>
           <Text style={styles.overlayTitle}>Game Over</Text>
           <View style={styles.statsRow}>
@@ -659,32 +625,33 @@ export default function Game() {
   );
 }
 
-function Overlay({ children }: { children: React.ReactNode }) {
+function Overlay({
+  children,
+  SW,
+}: {
+  children: React.ReactNode;
+  SW: number;
+}) {
   return (
     <View style={styles.overlayWrap} pointerEvents="box-none">
-      <View style={styles.overlayPanel}>{children}</View>
+      <View style={[styles.overlayPanel, { width: SW - 60 }]}>{children}</View>
     </View>
   );
 }
 
 function TiltIndicator({ tiltX, tiltY }: { tiltX: number; tiltY: number }) {
-  const dotX = 22 + tiltX * 20;
-  const dotY = 22 + tiltY * 20;
+  const dotX = 22 + tiltX * 18;
+  const dotY = 22 + tiltY * 18;
   return (
     <View style={styles.tiltIndicator} testID="tilt-indicator">
       <View style={styles.tiltCross} />
       <View style={styles.tiltCrossV} />
-      <View
-        style={[
-          styles.tiltDot,
-          { left: dotX - 6, top: dotY - 6 },
-        ]}
-      />
+      <View style={[styles.tiltDot, { left: dotX - 6, top: dotY - 6 }]} />
     </View>
   );
 }
 
-function BoostLines() {
+function BoostLines({ SW, SH }: { SW: number; SH: number }) {
   const lines = Array.from({ length: 10 });
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -713,15 +680,19 @@ function ParallaxClouds({
   offset,
   tiltX,
   tiltY,
+  SW,
+  SH,
 }: {
   offset: number;
   tiltX: number;
   tiltY: number;
+  SW: number;
+  SH: number;
 }) {
   const layers = [
-    { speed: 0.4, y: 90, size: 110, count: 4, opacity: 0.55 },
-    { speed: 0.7, y: 220, size: 80, count: 5, opacity: 0.7 },
-    { speed: 1.0, y: SH - 260, size: 130, count: 3, opacity: 0.8 },
+    { speed: 0.4, y: SH * 0.15, size: 110, count: 4, opacity: 0.55 },
+    { speed: 0.7, y: SH * 0.32, size: 80, count: 5, opacity: 0.7 },
+    { speed: 1.0, y: SH * 0.78, size: 130, count: 3, opacity: 0.8 },
   ];
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -729,7 +700,7 @@ function ParallaxClouds({
         Array.from({ length: layer.count }).map((_, i) => {
           const spacing = SW / layer.count + 80;
           const baseX =
-            (i * spacing - (offset * layer.speed) % (SW + 200)) - 100;
+            i * spacing - ((offset * layer.speed) % (SW + 200)) - 100;
           const x = baseX - tiltX * 30 * layer.speed;
           const y = layer.y - tiltY * 20 * layer.speed;
           return (
@@ -741,7 +712,8 @@ function ParallaxClouds({
                   width: layer.size,
                   height: layer.size * 0.45,
                   borderRadius: layer.size,
-                  left: ((x % (SW + 200)) + (SW + 200)) % (SW + 200) - 100,
+                  left:
+                    ((x % (SW + 200)) + (SW + 200)) % (SW + 200) - 100,
                   top: y,
                   opacity: layer.opacity,
                 },
@@ -763,10 +735,7 @@ const styles = StyleSheet.create({
     height: 4,
     backgroundColor: "rgba(15,23,42,0.18)",
   },
-  cloud: {
-    position: "absolute",
-    backgroundColor: "#FFFFFF",
-  },
+  cloud: { position: "absolute", backgroundColor: "#FFFFFF" },
   planeWrap: {
     position: "absolute",
     width: PLANE_SIZE,
@@ -774,22 +743,20 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  ring: {
+  planeHalo: {
     position: "absolute",
-    backgroundColor: "transparent",
+    width: PLANE_SIZE * 1.6,
+    height: PLANE_SIZE * 1.6,
+    borderRadius: PLANE_SIZE,
+    backgroundColor: "rgba(255,255,255,0.35)",
   },
+  ring: { position: "absolute", backgroundColor: "transparent" },
   obstacle: {
     position: "absolute",
     borderWidth: 2,
     borderColor: "#0F172A",
   },
-  hudSafe: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: 0,
-  },
+  hudSafe: { position: "absolute", left: 0, right: 0, top: 0, bottom: 0 },
   hudTop: {
     paddingHorizontal: 16,
     paddingTop: 8,
@@ -804,7 +771,7 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 14,
     paddingVertical: 8,
-    backgroundColor: "rgba(255,255,255,0.55)",
+    backgroundColor: "rgba(255,255,255,0.7)",
     borderColor: "#0F172A",
     borderWidth: 2,
     borderRadius: 999,
@@ -812,7 +779,7 @@ const styles = StyleSheet.create({
   hudPillCol: {
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: "rgba(255,255,255,0.55)",
+    backgroundColor: "rgba(255,255,255,0.7)",
     borderColor: "#0F172A",
     borderWidth: 2,
     borderRadius: 14,
@@ -838,7 +805,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "rgba(255,255,255,0.55)",
+    backgroundColor: "rgba(255,255,255,0.7)",
     borderWidth: 2,
     borderColor: "#0F172A",
     alignItems: "center",
@@ -877,7 +844,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 14,
-    backgroundColor: "rgba(255,255,255,0.7)",
+    backgroundColor: "rgba(255,255,255,0.85)",
     borderWidth: 2,
     borderColor: "#0F172A",
     alignItems: "center",
@@ -886,7 +853,6 @@ const styles = StyleSheet.create({
   boostBadge: {
     position: "absolute",
     bottom: 36,
-    alignSelf: "center",
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
@@ -896,7 +862,6 @@ const styles = StyleSheet.create({
     borderColor: "#0F172A",
     borderWidth: 2,
     borderRadius: 999,
-    left: SW / 2 - 60,
   },
   boostText: { fontWeight: "900", color: "#0F172A", letterSpacing: 1 },
   boostLine: {
@@ -913,18 +878,13 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(15,23,42,0.25)",
   },
   overlayPanel: {
-    backgroundColor: "rgba(255,255,255,0.92)",
+    backgroundColor: "rgba(255,255,255,0.95)",
     borderColor: "#0F172A",
     borderWidth: 2,
     borderRadius: 24,
     paddingHorizontal: 24,
     paddingVertical: 28,
     alignItems: "center",
-    width: SW - 60,
-    shadowColor: "#0F172A",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
   },
   overlayEyebrow: {
     fontSize: 11,
@@ -1002,12 +962,16 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   statValue: { fontSize: 22, fontWeight: "900", color: "#0F172A" },
-  linkText: { color: "#0F172A", fontWeight: "700", textDecorationLine: "underline" },
+  linkText: {
+    color: "#0F172A",
+    fontWeight: "700",
+    textDecorationLine: "underline",
+  },
   calibrationOverlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.6)",
+    backgroundColor: "rgba(255,255,255,0.7)",
   },
   calibrationText: {
     fontSize: 12,
