@@ -289,12 +289,15 @@ export default function Game() {
             objs.splice(i, 1);
             continue;
           }
-          if (!o.collected && o.z < 60) {
+          if (!o.collected && o.z < 50) {
             const dx = o.x - planeWorldX;
             const dy = o.y - planeWorldY;
             const distSq = dx * dx + dy * dy;
-            // Slightly forgiving hitbox
-            const hitR = o.baseSize * 0.6 + PLANE_SIZE * 0.3;
+            // Tighter hitboxes: obstacles forgiving, rings still easy to collect
+            const hitR =
+              o.type === "ring"
+                ? o.baseSize * 0.55 + PLANE_SIZE * 0.22
+                : o.baseSize * 0.38 + PLANE_SIZE * 0.18;
             if (distSq < hitR * hitR) {
               if (o.type === "ring") {
                 o.collected = true;
