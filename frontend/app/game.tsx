@@ -482,6 +482,32 @@ export default function Game() {
 
       {boostActive && <BoostLines SW={SW} SH={SH} />}
 
+      {/* Score popups */}
+      <View style={[StyleSheet.absoluteFill, { pointerEvents: "none" }]}>
+        {popupsRef.current.map((p) => {
+          const age = (performance.now() - p.t) / 800;
+          if (age > 1) return null;
+          const opacity = 1 - age;
+          const ty = -age * 70;
+          return (
+            <Text
+              key={p.id}
+              style={[
+                styles.scorePopup,
+                {
+                  left: SW / 2 - 30,
+                  top: SH * 0.55 + ty,
+                  opacity,
+                  transform: [{ scale: 1 + age * 0.4 }],
+                },
+              ]}
+            >
+              +{p.value}
+            </Text>
+          );
+        })}
+      </View>
+
       {/* Plane (with white halo so it stays visible) */}
       <View
         style={[
