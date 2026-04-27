@@ -14,15 +14,22 @@ import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import PaperPlane from "../src/PaperPlane";
 import Cloud from "../src/Cloud";
-import { loadHighScore } from "../src/storage";
+import {
+  loadProgress,
+  Progress,
+  nextLevelInfo,
+  DEFAULT_PROGRESS,
+} from "../src/progression";
 
 export default function Index() {
   const router = useRouter();
-  const [highScore, setHighScore] = useState(0);
+  const [progress, setProgress] = useState<Progress>(DEFAULT_PROGRESS);
   const bobAnim = useRef(new Animated.Value(0)).current;
+  const shimmer = useRef(new Animated.Value(0)).current;
+  const [shimmerVal, setShimmerVal] = useState(0);
 
   const refresh = useCallback(() => {
-    loadHighScore().then(setHighScore);
+    loadProgress().then(setProgress);
   }, []);
 
   useEffect(() => {
@@ -43,7 +50,17 @@ export default function Index() {
         }),
       ])
     ).start();
-  }, [refresh, bobAnim]);
+    const id = shimmer.addListener(({ value }) => setShimmerVal(value));
+    Animated.loop(
+      Animated.timing(shimmer, {
+        toValue: 1,
+        duration: 3500,
+        easing: Easing.linear,
+        useNativeDriver: false,
+      })
+    ).start();
+    return () => shimmer.removeListener(id);
+  }, [refresh, bobAnim, shimmer]);
 
   useFocusEffect(
     useCallback(() => {
@@ -60,6 +77,8 @@ export default function Index() {
     outputRange: ["-3deg", "3deg"],
   });
 
+  const lvl = nextLevelInfo(progress.xp);
+
   return (
     <LinearGradient
       colors={["#FFDEE9", "#FFE3B5", "#B5FFFC"]}
@@ -68,7 +87,6 @@ export default function Index() {
       end={{ x: 1, y: 1 }}
     >
       <SafeAreaView style={styles.safe}>
-        {/* Decorative clouds */}
         <View style={[styles.cloudPos, { top: 220, left: 20 }]}>
           <Cloud width={140} height={56} opacity={0.85} />
         </View>
@@ -80,12 +98,18 @@ export default function Index() {
         </View>
 
         <View style={styles.content}>
-          <View style={styles.headerBlock}>
-            <Text style={styles.eyebrow} testID="title-eyebrow">
-              TILT TO FLY
-            </Text>
-            <Text style={styles.title}>Mr. Maybe</Text>
-            <Text style={styles.titleAccent}>Flight</Text>
+          <View style={styles.headerRow}>
+            <View style={styles.headerBlock}>
+              <Text style={styles.eyebrow} testID="title-eyebrow">
+                TILT TO FLY
+              </Text>
+              <Text style={styles.title}>Mr. Maybe</Text>
+              <Text style={styles.titleAccent}>Flight</Text>
+            </View>
+            <View style={styles.levelBadge} testID="level-badge">
+              <Ionicons name="star" size={12} color="#0F172A" />
+              <Text style={styles.levelBadgeText}>LVL {lvl.level}</Text>
+            </View>
           </View>
 
           <Animated.View
@@ -99,12 +123,34 @@ export default function Index() {
               },
             ]}
           >
-            <PaperPlane size={170} tilt={-0.1} pitch={0.05} />
+            <PaperPlane
+              size={170}
+              tilt={-0.1}
+              pitch={0.05}
+              skinId={progress.equippedSkin}
+              shimmerPhase={shimmerVal}
+              flameTick={(shimmerVal * 5) % 1}
+            />
           </Animated.View>
 
-          <View style={styles.scoreCard} testID="high-score-card">
-            <Text style={styles.scoreLabel}>BEST SCORE</Text>
-            <Text style={styles.scoreValue}>{highScore}</Text>
+          {/* XP bar */}
+          <View style={styles.xpCard} testID="xp-card">
+            <View style={styles.xpRowTop}>
+              <Text style={styles.xpLabel}>
+                {lvl.isMax
+                  ? "MAX LEVEL"
+                  : `${lvl.xpInto} / ${lvl.xpNeeded} XP`}
+              </Text>
+              <Text style={styles.xpBest}>BEST {progress.bestScore}</Text>
+            </View>
+            <View style={styles.xpTrack}>
+              <View
+                style={[
+                  styles.xpFill,
+                  { width: `${Math.round(lvl.progress * 100)}%` },
+                ]}
+              />
+            </View>
           </View>
 
           <View style={styles.buttons}>
@@ -121,6 +167,14 @@ export default function Index() {
             <View style={styles.row}>
               <Pressable
                 style={styles.secondaryBtn}
+                onPress={() => router.push("/skins")}
+                testID="skins-button"
+              >
+                <Ionicons name="shirt-outline" size={18} color="#0F172A" />
+                <Text style={styles.secondaryBtnText}>Skins</Text>
+              </Pressable>
+              <Pressable
+                style={styles.secondaryBtn}
                 onPress={() => router.push("/settings")}
                 testID="settings-button"
               >
@@ -135,7 +189,7 @@ export default function Index() {
                 testID="calibrate-shortcut"
               >
                 <Ionicons name="compass-outline" size={18} color="#0F172A" />
-                <Text style={styles.secondaryBtnText}>Calibrate</Text>
+                <Text style={styles.secondaryBtnText}>Calib.</Text>
               </Pressable>
             </View>
           </View>
@@ -156,11 +210,16 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     paddingHorizontal: 28,
-    paddingTop: 40,
-    paddingBottom: 40,
+    paddingTop: 24,
+    paddingBottom: 32,
     justifyContent: "space-between",
   },
-  headerBlock: { alignItems: "flex-start" },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+  },
+  headerBlock: { alignItems: "flex-start", flex: 1 },
   eyebrow: {
     fontSize: 12,
     fontWeight: "800",
@@ -170,48 +229,80 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   title: {
-    fontSize: 56,
+    fontSize: 52,
     fontWeight: "900",
     color: "#0F172A",
     letterSpacing: -2,
-    lineHeight: 58,
+    lineHeight: 54,
   },
   titleAccent: {
-    fontSize: 56,
+    fontSize: 52,
     fontWeight: "900",
     color: "#FDE047",
     letterSpacing: -2,
-    lineHeight: 58,
+    lineHeight: 54,
+  },
+  levelBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: "#FDE047",
+    borderColor: "#0F172A",
+    borderWidth: 2,
+    borderRadius: 999,
+    marginTop: 8,
+  },
+  levelBadgeText: {
+    fontSize: 11,
+    fontWeight: "900",
+    color: "#0F172A",
+    letterSpacing: 1.5,
   },
   planeBox: {
     alignItems: "center",
     justifyContent: "center",
-    marginVertical: 16,
+    marginVertical: 8,
   },
-  scoreCard: {
-    alignSelf: "center",
-    backgroundColor: "rgba(255,255,255,0.65)",
+  xpCard: {
+    backgroundColor: "rgba(255,255,255,0.75)",
     borderColor: "#0F172A",
     borderWidth: 2,
-    borderRadius: 20,
-    paddingHorizontal: 28,
-    paddingVertical: 12,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 6,
+  },
+  xpRowTop: {
+    flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
   },
-  scoreLabel: {
+  xpLabel: {
     fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 3,
-    color: "#0F172A",
-    opacity: 0.7,
-  },
-  scoreValue: {
-    fontSize: 32,
     fontWeight: "900",
+    letterSpacing: 1.5,
     color: "#0F172A",
-    marginTop: 2,
   },
-  buttons: { gap: 14 },
+  xpBest: {
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 1.5,
+    color: "#0F172A",
+    opacity: 0.6,
+  },
+  xpTrack: {
+    height: 10,
+    backgroundColor: "rgba(15,23,42,0.12)",
+    borderRadius: 6,
+    overflow: "hidden",
+  },
+  xpFill: {
+    height: "100%",
+    backgroundColor: "#0F172A",
+  },
+  buttons: { gap: 12 },
   primaryBtn: {
     backgroundColor: "#FDE047",
     borderColor: "#0F172A",
@@ -229,7 +320,7 @@ const styles = StyleSheet.create({
     fontSize: 20,
     letterSpacing: 1,
   },
-  row: { flexDirection: "row", gap: 12 },
+  row: { flexDirection: "row", gap: 8 },
   secondaryBtn: {
     flex: 1,
     backgroundColor: "rgba(255,255,255,0.75)",
@@ -240,15 +331,15 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
+    gap: 6,
   },
-  secondaryBtnText: { color: "#0F172A", fontWeight: "800", fontSize: 14 },
+  secondaryBtnText: { color: "#0F172A", fontWeight: "800", fontSize: 13 },
   footnote: {
     textAlign: "center",
     color: "#0F172A",
     opacity: 0.55,
     fontSize: 12,
     fontWeight: "600",
-    marginTop: 8,
+    marginTop: 4,
   },
 });

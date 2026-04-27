@@ -7,6 +7,8 @@ import {
   useWindowDimensions,
   PanResponder,
   Platform,
+  Animated,
+  Easing,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -20,10 +22,26 @@ import {
   loadCalibration,
   saveCalibration,
   loadSensitivity,
-  loadHighScore,
-  saveHighScore,
   Calibration,
 } from "../src/storage";
+import {
+  loadProgress,
+  saveProgress,
+  applyRun,
+  Progress,
+  DEFAULT_PROGRESS,
+  RunResult,
+} from "../src/progression";
+import { SKINS, ACHIEVEMENTS, AchievementId, SkinId } from "../src/skins";
+
+// Map of which skins unlock from which achievement (kept here to avoid circular imports)
+const SKIN_BY_ACHIEVEMENT: Partial<Record<SkinId, AchievementId>> = {
+  mint: "rings_25",
+};
+const SKINS_BY_LEVEL: { id: SkinId; level: number }[] = [
+  { id: "skyblue", level: 3 },
+  { id: "crimson", level: 8 },
+];
 
 // World/projection constants
 const FOCAL = 320;
@@ -58,11 +76,14 @@ export default function Game() {
 
   const [state, setState] = useState<GameState>("ready");
   const [score, setScore] = useState(0);
-  const [highScore, setHighScore] = useState(0);
+  const [progress, setProgress] = useState<Progress>(DEFAULT_PROGRESS);
+  const [runResult, setRunResult] = useState<RunResult | null>(null);
   const [boostActive, setBoostActive] = useState(false);
   const [brakeActive, setBrakeActive] = useState(false);
   const [calibrating, setCalibrating] = useState(false);
   const [calibCountdown, setCalibCountdown] = useState(3);
+  const [shimmerVal, setShimmerVal] = useState(0);
+  const shimmerAnim = useRef(new Animated.Value(0)).current;
 
   const sensRef = useRef(1.0);
   const calibRef = useRef<Calibration>({ pitch: 0, roll: 0 });
@@ -78,6 +99,10 @@ export default function Game() {
   const scoreRef = useRef(0);
   const collectedRingsRef = useRef(0);
   const cloudOffsetRef = useRef(0);
+  // Run stats for progression
+  const runStartRef = useRef(0);
+  const boostsThisRunRef = useRef(0);
+  const wasBoostingRef = useRef(false);
 
   const [, setTick] = useState(0);
   const [crashFlash, setCrashFlash] = useState(false);
@@ -90,8 +115,19 @@ export default function Game() {
   useEffect(() => {
     loadSensitivity().then((s) => (sensRef.current = s));
     loadCalibration().then((c) => (calibRef.current = c));
-    loadHighScore().then(setHighScore);
-  }, []);
+    loadProgress().then(setProgress);
+    // Shimmer for skin animation
+    const id = shimmerAnim.addListener(({ value }) => setShimmerVal(value));
+    Animated.loop(
+      Animated.timing(shimmerAnim, {
+        toValue: 1,
+        duration: 3500,
+        easing: Easing.linear,
+        useNativeDriver: false,
+      })
+    ).start();
+    return () => shimmerAnim.removeListener(id);
+  }, [shimmerAnim]);
 
   // Sensor subscription — prefer DeviceMotion (gravity-compensated, more stable)
   // and only fall back to Accelerometer if DeviceMotion is unavailable.
@@ -147,7 +183,7 @@ export default function Game() {
     useCallback(() => {
       loadSensitivity().then((s) => (sensRef.current = s));
       loadCalibration().then((c) => (calibRef.current = c));
-      loadHighScore().then(setHighScore);
+      loadProgress().then(setProgress);
     }, [])
   );
 
@@ -194,6 +230,10 @@ export default function Game() {
     setScore(0);
     lastFrameRef.current = performance.now();
     lastSpawnRef.current = 0;
+    runStartRef.current = performance.now();
+    boostsThisRunRef.current = 0;
+    wasBoostingRef.current = false;
+    setRunResult(null);
   };
 
   const startGame = () => {
@@ -211,11 +251,30 @@ export default function Game() {
       ).catch(() => {});
     }
     const finalScore = Math.floor(scoreRef.current);
-    if (finalScore > highScore) {
-      setHighScore(finalScore);
-      try {
-        await saveHighScore(finalScore);
-      } catch {}
+    const seconds = Math.max(
+      0,
+      Math.round((performance.now() - runStartRef.current) / 1000)
+    );
+    const stats = {
+      score: finalScore,
+      rings: collectedRingsRef.current,
+      seconds,
+      boosts: boostsThisRunRef.current,
+      crashed: true,
+    };
+    try {
+      const cur = await loadProgress();
+      const { next, result } = applyRun(
+        cur,
+        stats,
+        SKIN_BY_ACHIEVEMENT,
+        SKINS_BY_LEVEL
+      );
+      await saveProgress(next);
+      setProgress(next);
+      setRunResult(result);
+    } catch (e) {
+      console.warn("apply run failed", e);
     }
   };
 
@@ -354,6 +413,10 @@ export default function Game() {
         if (stateRef.current === "playing") {
           boostRef.current = true;
           setBoostActive(true);
+          if (!wasBoostingRef.current) {
+            boostsThisRunRef.current += 1;
+            wasBoostingRef.current = true;
+          }
         }
       },
       onPanResponderMove: (_, g) => {
@@ -520,7 +583,14 @@ export default function Game() {
         ]}
       >
         <View style={styles.planeHalo} />
-        <PaperPlane size={PLANE_SIZE} tilt={tiltX} pitch={-tiltY} />
+        <PaperPlane
+          size={PLANE_SIZE}
+          tilt={tiltX}
+          pitch={-tiltY}
+          skinId={progress.equippedSkin}
+          shimmerPhase={shimmerVal}
+          flameTick={(shimmerVal * 5) % 1}
+        />
       </View>
 
       {/* Touch capture during play */}
@@ -693,9 +763,53 @@ export default function Game() {
             </View>
             <View style={styles.statBox}>
               <Text style={styles.statLabel}>BEST</Text>
-              <Text style={styles.statValue}>{highScore}</Text>
+              <Text style={styles.statValue}>{progress.bestScore}</Text>
             </View>
           </View>
+
+          {runResult && (
+            <View style={styles.rewardBlock} testID="reward-block">
+              <View style={styles.xpBadge}>
+                <Ionicons name="star" size={14} color="#0F172A" />
+                <Text style={styles.xpBadgeText}>
+                  +{runResult.xpGained} XP
+                </Text>
+              </View>
+              {runResult.leveledUp && (
+                <Text style={styles.unlockText}>
+                  Level Up → {runResult.newLevel}!
+                </Text>
+              )}
+              {runResult.unlockedSkinsByLevel.map((id) => (
+                <Text key={`l-${id}`} style={styles.unlockText}>
+                  Skin Unlocked: {SKINS[id].name}
+                </Text>
+              ))}
+              {runResult.unlockedSkinsByAchievement.map((id) => (
+                <Text key={`a-${id}`} style={styles.unlockText}>
+                  Skin Unlocked: {SKINS[id].name}
+                </Text>
+              ))}
+              {runResult.unlockedAchievements
+                .filter(
+                  (a) =>
+                    !runResult.unlockedSkinsByAchievement.some(
+                      (sid) => SKIN_BY_ACHIEVEMENT[sid] === a
+                    )
+                )
+                .map((a) => (
+                  <Text key={`ach-${a}`} style={styles.unlockText}>
+                    Achievement: {ACHIEVEMENTS[a].name}
+                  </Text>
+                ))}
+              {runResult.newBestScore && (
+                <Text style={[styles.unlockText, { color: "#B91C1C" }]}>
+                  New Best Score!
+                </Text>
+              )}
+            </View>
+          )}
+
           <View style={styles.overlayBtnRow}>
             <TouchableOpacity
               style={styles.primaryBtn}
@@ -838,6 +952,42 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: "900",
     color: "#FDE047",
+  },
+  rewardBlock: {
+    backgroundColor: "rgba(253,224,71,0.35)",
+    borderColor: "#0F172A",
+    borderWidth: 2,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginTop: 14,
+    alignItems: "center",
+    gap: 4,
+    width: "100%",
+  },
+  xpBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#FDE047",
+    borderColor: "#0F172A",
+    borderWidth: 2,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    marginBottom: 4,
+  },
+  xpBadgeText: {
+    fontWeight: "900",
+    color: "#0F172A",
+    letterSpacing: 1,
+    fontSize: 13,
+  },
+  unlockText: {
+    fontWeight: "800",
+    color: "#0F172A",
+    fontSize: 13,
+    textAlign: "center",
   },
   planeWrap: {
     position: "absolute",
