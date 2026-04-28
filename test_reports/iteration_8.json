@@ -1,0 +1,46 @@
+{
+  "summary": "Iteration 8 mega-feature pass for Mr. Maybe Flight (Stripe + tutorial + daily + sound + cloud-save). Backend: 7/8 pytest cases pass. Frontend: ALL 4 polish features verified on the live preview at 390x844 mobile viewport. The Stripe key sk_test_emergent IS a working test key — POST /api/checkout/session?skin=aurora returns a real https://checkout.stripe.com/c/pay/cs_test_... URL + session_id. Save/restore round-trip works (code format AAAA-AAAA, 4-4 split, uppercase normalized, 404 on unknown). Owned-skins endpoint returns {owned:[]} for unknown device. Tutorial overlay shows on first launch with 3 swipeable steps + dots, Skip + Next/GOT IT buttons; once dismissed (@mmf_tutorial_seen=1) it does NOT show on reload. Daily-button navigates to /game?daily=1 (Ready overlay loads). Settings: sound-toggle, backup-button (generated 'YTNG-HPK3'), share-code, restore-code-input, restore-button all visible & functional. Skins: buy-chip-aurora/phoenix/galaxy all show 'BUY $2.99'; tapping a premium card opens WebBrowser without crash. ONE backend bug: GET /api/checkout/status/{unknown_id} returns plain-text 500 'Internal Server Error' (uncaught Stripe upstream exception).",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/checkout/status/{session_id}",
+        "issue": "When session_id is unknown to Stripe, the endpoint raises an uncaught exception and returns text/plain 'Internal Server Error' (500). Should wrap stripe_checkout.get_checkout_status() in try/except and return HTTPException(404, ...) or a clean JSON 500 with detail. The frontend pollPaymentStatus() catches all errors so it degrades gracefully, but the endpoint itself is not robust. Reproduce: curl -i https://flying-game-demo-1.preview.emergentagent.com/api/checkout/status/cs_test_does_not_exist_xyz",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration8.py",
+    "/app/test_reports/pytest/iter8_results.xml"
+  ],
+  "action_items": [
+    "Wrap GET /api/checkout/status/{session_id} in try/except — when stripe_checkout.get_checkout_status() raises (unknown session, network, etc.) return HTTPException(404, 'Session not found') or a clean JSON 500 instead of the default text/plain 500. Same hardening recommended for POST /api/webhook/stripe (already wrapped) and POST /api/checkout/session (currently raises bare exception if Stripe is down)."
+  ],
+  "critical_code_review_comments": [
+    "server.py /api/checkout/status/{session_id} has no try/except around stripe_checkout.get_checkout_status() — any upstream Stripe error bubbles up as a 500 with no JSON body.",
+    "server.py /api/checkout/session also lacks defensive error handling around create_checkout_session(); a Stripe outage would return a plain 500.",
+    "audio.ts createAudioPlayer is called even on web where expo-audio support is partial — try/catch is in place which is correct, but the per-sound failure is only console.warn'd; consider logging once at preload to reduce noise.",
+    "frontend Tutorial.tsx ScrollView width is computed once from Dimensions.get('window') at import time — won't react to orientation/resize on web; minor since this is a portrait-only mobile-first app.",
+    "skins.tsx pollPaymentStatus polls 8 times every 2s = ~16s window. For some legit Stripe redirects this can be tight; consider extending or moving to webhook-only confirmation."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration8.py (new)",
+    "/app/backend/tests/__init__.py (new)"
+  ],
+  "success_rate": {
+    "backend": "87.5% (7/8 pytest)",
+    "frontend": "100% (all iteration-8 testIDs verified: tutorial-overlay, tutorial-skip, tutorial-next, daily-button, sound-toggle, backup-button, save-code, share-code, restore-code-input, restore-button, buy-chip-aurora/phoenix/galaxy, skin-card-aurora premium tap)"
+  },
+  "seed_data_creation": "Cleared localStorage to simulate first-launch; created two ephemeral save codes via /api/save (one verified round-trip via GET).",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Tested via Playwright at https://flying-game-demo-1.preview.emergentagent.com on 390x844. STRIPE_API_KEY=sk_test_emergent IS a real working Stripe test key — checkout session creation returned a live https://checkout.stripe.com/c/pay/cs_test_... URL. Save round-trip works perfectly (POST /api/save -> code -> GET /api/save/{code} -> identical progress). Tutorial overlay shows on first launch and never again after Got It / Skip (AsyncStorage @mmf_tutorial_seen=1 verified by reload). All 4 polish features (tutorial, sound toggle, daily challenge button + route, cloud save+restore) and Stripe BUY $2.99 chips are live in UI. The ONE outstanding bug is GET /api/checkout/status/{session_id} returning plain-text 500 for unknown sessions — main agent should wrap that endpoint in try/except. Single benign console error: a 404 image fetch (likely a missing icon font glyph) — same as iteration 7, not new.",
+  "rca_of_issue": "GET /api/checkout/status/{session_id} 500 RCA: emergentintegrations.payments.stripe.checkout.StripeCheckout.get_checkout_status() raises a non-HTTPException when Stripe returns 'No such checkout.session' for an unknown id. FastAPI's default exception handler then returns text/plain 'Internal Server Error'. Fix: wrap the call in try/except Exception as e: raise HTTPException(404, 'Checkout session not found') in /app/backend/server.py around line 176-178."
+}

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="8" time="6.793" timestamp="2026-04-28T18:35:04.687337+00:00" hostname="agent-env-6c4f1e3a-52af-4f92-9532-221c74db85b8"><testcase classname="backend.tests.test_iteration8.TestHealth" name="test_root" time="0.592" /><testcase classname="backend.tests.test_iteration8.TestSaveRestore" name="test_save_then_fetch" time="0.126" /><testcase classname="backend.tests.test_iteration8.TestSaveRestore" name="test_fetch_invalid_code" time="0.133" /><testcase classname="backend.tests.test_iteration8.TestSaveRestore" name="test_fetch_lowercase_normalized" time="0.135" /><testcase classname="backend.tests.test_iteration8.TestOwnedSkins" name="test_unknown_device_returns_empty" time="0.108" /><testcase classname="backend.tests.test_iteration8.TestStripeCheckout" name="test_unknown_skin_400" time="0.065" /><testcase classname="backend.tests.test_iteration8.TestStripeCheckout" name="test_create_session_aurora_clean_error_or_url" time="3.463" /><testcase classname="backend.tests.test_iteration8.TestStripeCheckout" name="test_status_unknown_session" time="0.249"><failure message="Failed: Non-JSON response: 500">/root/.venv/lib/python3.11/site-packages/requests/models.py:978: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+backend/tests/test_iteration8.py:120: in test_status_unknown_session
+    r.json()
+/root/.venv/lib/python3.11/site-packages/requests/models.py:982: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+backend/tests/test_iteration8.py:122: in test_status_unknown_session
+    pytest.fail(f"Non-JSON response: {r.status_code}")
+E   Failed: Non-JSON response: 500</failure></testcase></testsuite></testsuites>

@@ -9,32 +9,56 @@ import {
   Easing,
   Platform,
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import PaperPlane from "../src/PaperPlane";
 import Cloud from "../src/Cloud";
+import TutorialOverlay from "../src/Tutorial";
 import {
   loadProgress,
+  saveProgress,
   Progress,
   nextLevelInfo,
   DEFAULT_PROGRESS,
 } from "../src/progression";
+import { getOwnedSkins } from "../src/api";
+import { todaySeedString } from "../src/daily";
+
+const TUTORIAL_KEY = "@mmf_tutorial_seen";
 
 export default function Index() {
   const router = useRouter();
   const [progress, setProgress] = useState<Progress>(DEFAULT_PROGRESS);
+  const [showTutorial, setShowTutorial] = useState(false);
   const bobAnim = useMemo(() => new Animated.Value(0), []);
   const shimmer = useMemo(() => new Animated.Value(0), []);
   const [shimmerVal, setShimmerVal] = useState(0);
 
-  const refresh = useCallback(() => {
-    loadProgress().then(setProgress);
+  const refresh = useCallback(async () => {
+    const p = await loadProgress();
+    setProgress(p);
+    // Best-effort: pull premium skins owned on backend (post-purchase)
+    try {
+      const owned = await getOwnedSkins();
+      if (owned.length) {
+        const merged = Array.from(new Set([...p.ownedSkins, ...owned]));
+        if (merged.length !== p.ownedSkins.length) {
+          const updated = { ...p, ownedSkins: merged };
+          await saveProgress(updated);
+          setProgress(updated);
+        }
+      }
+    } catch {}
   }, []);
 
   useEffect(() => {
     refresh();
+    AsyncStorage.getItem(TUTORIAL_KEY).then((v) => {
+      if (v !== "1") setShowTutorial(true);
+    });
     const useNative = Platform.OS !== "web";
     const bobLoop = Animated.loop(
       Animated.sequence([
@@ -76,6 +100,13 @@ export default function Index() {
     }, [refresh])
   );
 
+  const dismissTutorial = async () => {
+    setShowTutorial(false);
+    try {
+      await AsyncStorage.setItem(TUTORIAL_KEY, "1");
+    } catch {}
+  };
+
   const planeTranslateY = bobAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [0, -14],
@@ -86,6 +117,10 @@ export default function Index() {
   });
 
   const lvl = nextLevelInfo(progress.xp);
+  const dailyTodayBest =
+    progress.lastDailySeed === todaySeedString()
+      ? progress.lastDailyScore || 0
+      : 0;
 
   return (
     <LinearGradient
@@ -101,7 +136,7 @@ export default function Index() {
         <View style={[styles.cloudPos, { top: 320, right: 10 }]}>
           <Cloud width={100} height={42} opacity={0.7} />
         </View>
-        <View style={[styles.cloudPos, { bottom: 240, left: 40 }]}>
+        <View style={[styles.cloudPos, { bottom: 260, left: 40 }]}>
           <Cloud width={120} height={50} opacity={0.6} />
         </View>
 
@@ -132,7 +167,7 @@ export default function Index() {
             ]}
           >
             <PaperPlane
-              size={170}
+              size={150}
               tilt={-0.1}
               pitch={0.05}
               skinId={progress.equippedSkin}
@@ -141,7 +176,6 @@ export default function Index() {
             />
           </Animated.View>
 
-          {/* XP bar */}
           <View style={styles.xpCard} testID="xp-card">
             <View style={styles.xpRowTop}>
               <Text style={styles.xpLabel}>
@@ -170,6 +204,23 @@ export default function Index() {
             >
               <Ionicons name="play" size={22} color="#0F172A" />
               <Text style={styles.primaryBtnText}>START GAME</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.dailyBtn}
+              activeOpacity={0.85}
+              onPress={() =>
+                router.push({ pathname: "/game", params: { daily: "1" } })
+              }
+              testID="daily-button"
+            >
+              <Ionicons name="calendar" size={18} color="#0F172A" />
+              <Text style={styles.dailyBtnText}>DAILY CHALLENGE</Text>
+              {dailyTodayBest > 0 && (
+                <View style={styles.dailyChip}>
+                  <Text style={styles.dailyChipText}>{dailyTodayBest}</Text>
+                </View>
+              )}
             </TouchableOpacity>
 
             <View style={styles.row}>
@@ -206,6 +257,8 @@ export default function Index() {
             Hold screen to boost · Swipe down to brake
           </Text>
         </View>
+
+        {showTutorial && <TutorialOverlay onDone={dismissTutorial} />}
       </SafeAreaView>
     </LinearGradient>
   );
@@ -217,9 +270,9 @@ const styles = StyleSheet.create({
   cloudPos: { position: "absolute" },
   content: {
     flex: 1,
-    paddingHorizontal: 28,
-    paddingTop: 24,
-    paddingBottom: 32,
+    paddingHorizontal: 24,
+    paddingTop: 20,
+    paddingBottom: 28,
     justifyContent: "space-between",
   },
   headerRow: {
@@ -229,26 +282,26 @@ const styles = StyleSheet.create({
   },
   headerBlock: { alignItems: "flex-start", flex: 1 },
   eyebrow: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "800",
     letterSpacing: 4,
     color: "#0F172A",
     opacity: 0.6,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   title: {
-    fontSize: 52,
+    fontSize: 46,
     fontWeight: "900",
     color: "#0F172A",
     letterSpacing: -2,
-    lineHeight: 54,
+    lineHeight: 48,
   },
   titleAccent: {
-    fontSize: 52,
+    fontSize: 46,
     fontWeight: "900",
     color: "#FDE047",
     letterSpacing: -2,
-    lineHeight: 54,
+    lineHeight: 48,
   },
   levelBadge: {
     flexDirection: "row",
@@ -271,7 +324,7 @@ const styles = StyleSheet.create({
   planeBox: {
     alignItems: "center",
     justifyContent: "center",
-    marginVertical: 8,
+    marginVertical: 4,
   },
   xpCard: {
     backgroundColor: "rgba(255,255,255,0.75)",
@@ -310,13 +363,13 @@ const styles = StyleSheet.create({
     height: "100%",
     backgroundColor: "#0F172A",
   },
-  buttons: { gap: 12 },
+  buttons: { gap: 10 },
   primaryBtn: {
     backgroundColor: "#FDE047",
     borderColor: "#0F172A",
     borderWidth: 2,
     borderRadius: 22,
-    paddingVertical: 18,
+    paddingVertical: 16,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -325,17 +378,45 @@ const styles = StyleSheet.create({
   primaryBtnText: {
     color: "#0F172A",
     fontWeight: "900",
-    fontSize: 20,
+    fontSize: 18,
     letterSpacing: 1,
   },
-  row: { flexDirection: "row", gap: 8 },
-  secondaryBtn: {
-    flex: 1,
-    backgroundColor: "rgba(255,255,255,0.75)",
+  dailyBtn: {
+    backgroundColor: "#A5F3FC",
     borderColor: "#0F172A",
     borderWidth: 2,
     borderRadius: 18,
     paddingVertical: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  dailyBtnText: {
+    color: "#0F172A",
+    fontWeight: "900",
+    fontSize: 14,
+    letterSpacing: 1.2,
+  },
+  dailyChip: {
+    backgroundColor: "#0F172A",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+  },
+  dailyChipText: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  row: { flexDirection: "row", gap: 8 },
+  secondaryBtn: {
+    flex: 1,
+    backgroundColor: "rgba(255,255,255,0.78)",
+    borderColor: "#0F172A",
+    borderWidth: 2,
+    borderRadius: 16,
+    paddingVertical: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",

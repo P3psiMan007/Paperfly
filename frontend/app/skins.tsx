@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
   View,
   Text,
@@ -7,11 +7,14 @@ import {
   ScrollView,
   Animated,
   Easing,
+  Alert,
+  ActivityIndicator,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter, useFocusEffect } from "expo-router";
+import { useRouter, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import * as WebBrowser from "expo-web-browser";
 import PaperPlane from "../src/PaperPlane";
 import {
   loadProgress,
@@ -25,15 +28,38 @@ import {
   unlockSummary,
   ACHIEVEMENTS,
 } from "../src/skins";
+import {
+  createCheckoutSession,
+  getCheckoutStatus,
+  getOwnedSkins,
+} from "../src/api";
 
 export default function Skins() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ session_id?: string; cancelled?: string }>();
   const [progress, setProgress] = useState<Progress | null>(null);
   const shimmer = useMemo(() => new Animated.Value(0), []);
   const [shimmerVal, setShimmerVal] = useState(0);
+  const [purchasing, setPurchasing] = useState<string | null>(null);
+  const [polling, setPolling] = useState(false);
+  const pollAttemptsRef = useRef(0);
 
-  const refresh = useCallback(() => {
-    loadProgress().then(setProgress);
+  const refresh = useCallback(async () => {
+    const p = await loadProgress();
+    // Sync owned premium skins from backend
+    try {
+      const owned = await getOwnedSkins();
+      if (owned.length) {
+        const merged = Array.from(new Set([...p.ownedSkins, ...(owned as any)]));
+        if (merged.length !== p.ownedSkins.length) {
+          const updated = { ...p, ownedSkins: merged as any };
+          await saveProgress(updated);
+          setProgress(updated);
+          return;
+        }
+      }
+    } catch {}
+    setProgress(p);
   }, []);
 
   useFocusEffect(
@@ -60,12 +86,83 @@ export default function Skins() {
     };
   }, [refresh, shimmer]);
 
+  // Handle return from Stripe checkout
+  useEffect(() => {
+    if (params.session_id) {
+      pollPaymentStatus(params.session_id as string);
+    } else if (params.cancelled === "1") {
+      Alert.alert("Payment cancelled");
+      router.setParams({ cancelled: undefined });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.session_id, params.cancelled]);
+
+  const pollPaymentStatus = async (sessionId: string) => {
+    setPolling(true);
+    pollAttemptsRef.current = 0;
+    const tick = async () => {
+      pollAttemptsRef.current += 1;
+      try {
+        const s = await getCheckoutStatus(sessionId);
+        if (s.payment_status === "paid") {
+          await refresh();
+          Alert.alert(
+            "Purchase complete!",
+            s.skin_id ? `Unlocked ${s.skin_id} skin.` : "Skin unlocked."
+          );
+          setPolling(false);
+          router.setParams({ session_id: undefined });
+          return;
+        }
+        if (s.status === "expired" || pollAttemptsRef.current > 8) {
+          Alert.alert(
+            "Payment status",
+            "Could not confirm payment. If you completed it, please refresh in a moment."
+          );
+          setPolling(false);
+          router.setParams({ session_id: undefined });
+          return;
+        }
+        setTimeout(tick, 2000);
+      } catch {
+        if (pollAttemptsRef.current > 8) {
+          setPolling(false);
+          router.setParams({ session_id: undefined });
+          return;
+        }
+        setTimeout(tick, 2000);
+      }
+    };
+    tick();
+  };
+
   const equip = async (id: Skin["id"]) => {
     if (!progress) return;
     if (!progress.ownedSkins.includes(id)) return;
     const next = { ...progress, equippedSkin: id };
     setProgress(next);
     await saveProgress(next);
+  };
+
+  const buyPremium = async (skin: Skin) => {
+    setPurchasing(skin.id);
+    try {
+      const origin =
+        (process.env.EXPO_PUBLIC_BACKEND_URL || "").replace(/\/$/, "") ||
+        "https://example.com";
+      const { url } = await createCheckoutSession(skin.id, origin);
+      // Open Stripe Checkout in an in-app browser; on success we land back at /skins?session_id=...
+      const result = await WebBrowser.openBrowserAsync(url);
+      // After browser closes, refresh state (in case we already handle redirect via deep link)
+      if (result.type === "cancel" || result.type === "dismiss") {
+        // Best-effort: poll once via getOwnedSkins
+        await refresh();
+      }
+    } catch (e: any) {
+      Alert.alert("Checkout failed", e?.message || "Please try again");
+    } finally {
+      setPurchasing(null);
+    }
   };
 
   if (!progress) {
@@ -99,6 +196,15 @@ export default function Skins() {
           </View>
         </View>
 
+        {polling && (
+          <View style={styles.pollBanner} testID="payment-polling">
+            <ActivityIndicator size="small" color="#0F172A" />
+            <Text style={styles.pollText}>
+              Confirming your payment with Stripe…
+            </Text>
+          </View>
+        )}
+
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.sectionLabel}>FREE · EARN BY PLAYING</Text>
           <View style={styles.grid}>
@@ -109,13 +215,15 @@ export default function Skins() {
                 owned={progress.ownedSkins.includes(s.id)}
                 equipped={progress.equippedSkin === s.id}
                 onEquip={equip}
+                onBuy={buyPremium}
                 shimmerVal={shimmerVal}
+                purchasing={purchasing === s.id}
               />
             ))}
           </View>
 
           <Text style={[styles.sectionLabel, { marginTop: 22 }]}>
-            PREMIUM · COMING SOON
+            PREMIUM · $2.99 EACH
           </Text>
           <View style={styles.grid}>
             {SKIN_LIST.filter((s) => s.type === "premium").map((s) => (
@@ -125,7 +233,9 @@ export default function Skins() {
                 owned={progress.ownedSkins.includes(s.id)}
                 equipped={progress.equippedSkin === s.id}
                 onEquip={equip}
+                onBuy={buyPremium}
                 shimmerVal={shimmerVal}
+                purchasing={purchasing === s.id}
               />
             ))}
           </View>
@@ -163,25 +273,38 @@ function SkinCard({
   owned,
   equipped,
   onEquip,
+  onBuy,
   shimmerVal,
+  purchasing,
 }: {
   skin: Skin;
   owned: boolean;
   equipped: boolean;
   onEquip: (id: Skin["id"]) => void;
+  onBuy: (s: Skin) => void;
   shimmerVal: number;
+  purchasing: boolean;
 }) {
   const locked = !owned;
   const isPremium = skin.type === "premium";
+
+  const handlePress = () => {
+    if (owned && !equipped) {
+      onEquip(skin.id);
+    } else if (!owned && isPremium) {
+      onBuy(skin);
+    }
+  };
+
   return (
     <TouchableOpacity
-      activeOpacity={owned ? 0.85 : 1}
+      activeOpacity={isPremium || owned ? 0.85 : 1}
       style={[
         styles.card,
         equipped && styles.cardEquipped,
         locked && styles.cardLocked,
       ]}
-      onPress={() => owned && !equipped && onEquip(skin.id)}
+      onPress={handlePress}
       testID={`skin-card-${skin.id}`}
     >
       {isPremium && (
@@ -204,7 +327,18 @@ function SkinCard({
       <Text style={styles.skinTagline} numberOfLines={2}>
         {skin.tagline}
       </Text>
-      {locked ? (
+      {purchasing ? (
+        <View style={styles.equipChip}>
+          <ActivityIndicator size="small" color="#FFFFFF" />
+        </View>
+      ) : locked && isPremium ? (
+        <View
+          style={[styles.equipChip, { backgroundColor: "#FDE047" }]}
+          testID={`buy-chip-${skin.id}`}
+        >
+          <Text style={[styles.equipText, { color: "#0F172A" }]}>BUY $2.99</Text>
+        </View>
+      ) : locked ? (
         <View style={styles.lockChip}>
           <Ionicons name="lock-closed" size={11} color="#0F172A" />
           <Text style={styles.lockText} numberOfLines={1}>
@@ -268,6 +402,24 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     color: "#0F172A",
   },
+  pollBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#A5F3FC",
+    borderColor: "#0F172A",
+    borderWidth: 2,
+    borderRadius: 12,
+    marginHorizontal: 18,
+    marginBottom: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  pollText: {
+    color: "#0F172A",
+    fontWeight: "800",
+    fontSize: 13,
+  },
   content: { padding: 18, paddingBottom: 40 },
   sectionLabel: {
     fontSize: 11,
@@ -277,11 +429,7 @@ const styles = StyleSheet.create({
     opacity: 0.7,
     marginBottom: 10,
   },
-  grid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
+  grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   card: {
     width: "48%",
     backgroundColor: "rgba(255,255,255,0.78)",
@@ -292,12 +440,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     minHeight: 200,
   },
-  cardEquipped: {
-    backgroundColor: "#FDE047",
-  },
-  cardLocked: {
-    opacity: 0.78,
-  },
+  cardEquipped: { backgroundColor: "#FDE047" },
+  cardLocked: { opacity: 0.92 },
   preview: {
     height: 100,
     width: "100%",
@@ -353,13 +497,13 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   equipChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     backgroundColor: "rgba(15,23,42,0.85)",
     borderRadius: 999,
   },
   equipText: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: "900",
     color: "#FFFFFF",
     letterSpacing: 1,

@@ -9,6 +9,7 @@ import {
   Platform,
   Animated,
   Easing,
+  Share,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -33,6 +34,8 @@ import {
   RunResult,
 } from "../src/progression";
 import { SKINS, ACHIEVEMENTS, AchievementId, SkinId } from "../src/skins";
+import { mulberry32, todaySeed, todaySeedString } from "../src/daily";
+import { playSfx, preloadSounds, loadSfxEnabled } from "../src/audio";
 
 // Map of which skins unlock from which achievement (kept here to avoid circular imports)
 const SKIN_BY_ACHIEVEMENT: Partial<Record<SkinId, AchievementId>> = {
@@ -71,8 +74,10 @@ let nextId = 1;
 
 export default function Game() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ calibrate?: string }>();
+  const params = useLocalSearchParams<{ calibrate?: string; daily?: string }>();
   const { width: SW, height: SH } = useWindowDimensions();
+  const isDaily = params.daily === "1";
+  const dailyRngRef = useRef<(() => number) | null>(null);
 
   const [state, setState] = useState<GameState>("ready");
   const [score, setScore] = useState(0);
@@ -256,6 +261,8 @@ export default function Game() {
     boostsThisRunRef.current = 0;
     wasBoostingRef.current = false;
     setRunResult(null);
+    // Reset daily RNG so the same daily is reproducible per attempt
+    dailyRngRef.current = isDaily ? mulberry32(todaySeed()) : null;
   };
 
   const startGame = () => {
@@ -292,12 +299,31 @@ export default function Game() {
         SKIN_BY_ACHIEVEMENT,
         SKINS_BY_LEVEL
       );
+      // Track daily best for this seed
+      if (isDaily) {
+        const seedStr = todaySeedString();
+        const prevDaily =
+          next.lastDailySeed === seedStr ? next.lastDailyScore || 0 : 0;
+        next.lastDailySeed = seedStr;
+        next.lastDailyScore = Math.max(prevDaily, finalScore);
+      }
       await saveProgress(next);
       setProgress(next);
       setRunResult(result);
     } catch (e) {
       console.warn("apply run failed", e);
     }
+  };
+
+  const shareScore = async () => {
+    const finalScore = Math.floor(scoreRef.current);
+    const tag = isDaily
+      ? `Daily Challenge ${todaySeedString()}`
+      : "Mr. Maybe Flight";
+    const message = `${tag} — I scored ${finalScore} points and collected ${collectedRingsRef.current} rings! Can you beat me? ✈️`;
+    try {
+      await Share.share({ message });
+    } catch {}
   };
 
   // Game loop
@@ -355,15 +381,16 @@ export default function Game() {
         lastSpawnRef.current += dt;
         if (lastSpawnRef.current >= 0.55) {
           lastSpawnRef.current = 0;
-          const isRing = Math.random() < 0.6;
+          const rand = dailyRngRef.current ? dailyRngRef.current : Math.random;
+          const isRing = rand() < 0.6;
           objectsRef.current.push({
             id: nextId++,
             type: isRing ? "ring" : "obstacle",
-            x: (Math.random() - 0.5) * PLANE_X_RANGE * 2.4,
-            y: (Math.random() - 0.5) * PLANE_Y_RANGE * 2.0,
-            z: SPAWN_Z + Math.random() * 100,
-            baseSize: isRing ? 55 : 70 + Math.random() * 30,
-            hue: isRing ? "#FDE047" : Math.random() < 0.5 ? "#FCA5A5" : "#FBA5C5",
+            x: (rand() - 0.5) * PLANE_X_RANGE * 2.4,
+            y: (rand() - 0.5) * PLANE_Y_RANGE * 2.0,
+            z: SPAWN_Z + rand() * 100,
+            baseSize: isRing ? 55 : 70 + rand() * 30,
+            hue: isRing ? "#FDE047" : rand() < 0.5 ? "#FCA5A5" : "#FBA5C5",
           });
         }
 
@@ -399,6 +426,7 @@ export default function Game() {
                   value: 50,
                   t: now,
                 });
+                playSfx("ring", 0.5);
                 if (Platform.OS !== "web") {
                   Haptics.impactAsync(
                     Haptics.ImpactFeedbackStyle.Light
@@ -407,6 +435,7 @@ export default function Game() {
               } else {
                 setCrashFlash(true);
                 setTimeout(() => setCrashFlash(false), 280);
+                playSfx("crash", 0.7);
                 endGame();
                 break;
               }
@@ -438,6 +467,7 @@ export default function Game() {
           if (!wasBoostingRef.current) {
             boostsThisRunRef.current += 1;
             wasBoostingRef.current = true;
+            playSfx("boost", 0.5);
           }
         }
       },
@@ -802,6 +832,14 @@ export default function Game() {
 
       {state === "gameover" && (
         <Overlay SW={SW}>
+          {isDaily && (
+            <View style={styles.dailyTag}>
+              <Ionicons name="calendar" size={11} color="#0F172A" />
+              <Text style={styles.dailyTagText}>
+                DAILY · {todaySeedString()}
+              </Text>
+            </View>
+          )}
           <Text style={styles.overlayEyebrow}>CRASHED</Text>
           <Text style={styles.overlayTitle}>Game Over</Text>
           <View style={styles.statsRow}>
@@ -870,6 +908,14 @@ export default function Game() {
             >
               <Ionicons name="refresh" size={18} color="#0F172A" />
               <Text style={styles.primaryBtnText}>RETRY</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.ghostBtn}
+              onPress={shareScore}
+              testID="share-score-button"
+            >
+              <Ionicons name="share-social-outline" size={18} color="#0F172A" />
+              <Text style={styles.ghostBtnText}>Share</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.ghostBtn}
@@ -1040,6 +1086,35 @@ const styles = StyleSheet.create({
     color: "#0F172A",
     fontSize: 13,
     textAlign: "center",
+  },
+  dailyTag: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#A5F3FC",
+    borderColor: "#0F172A",
+    borderWidth: 2,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginBottom: 8,
+  },
+  dailyTagText: {
+    fontSize: 10,
+    fontWeight: "900",
+    color: "#0F172A",
+    letterSpacing: 1.5,
+  },
+  ghostBtnSmall: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 2,
+    borderColor: "#0F172A",
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
   },
   planeWrap: {
     position: "absolute",

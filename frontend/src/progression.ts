@@ -13,6 +13,8 @@ export type Progress = {
   achievements: AchievementId[];
   ownedSkins: SkinId[];
   equippedSkin: SkinId;
+  lastDailySeed?: string;
+  lastDailyScore?: number;
 };
 
 export const DEFAULT_PROGRESS: Progress = {
