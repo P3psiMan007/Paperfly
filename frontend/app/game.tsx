@@ -103,6 +103,7 @@ export default function Game() {
   const runStartRef = useRef(0);
   const boostsThisRunRef = useRef(0);
   const wasBoostingRef = useRef(false);
+  const calibTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [, setTick] = useState(0);
   const [crashFlash, setCrashFlash] = useState(false);
@@ -195,15 +196,22 @@ export default function Game() {
   }, [params.calibrate]);
 
   const doCalibrate = () => {
+    if (calibTimerRef.current) {
+      clearInterval(calibTimerRef.current);
+      calibTimerRef.current = null;
+    }
     setCalibrating(true);
     setCalibCountdown(3);
     let n = 3;
-    const timer = setInterval(() => {
+    calibTimerRef.current = setInterval(() => {
       n -= 1;
       if (n > 0) {
         setCalibCountdown(n);
       } else {
-        clearInterval(timer);
+        if (calibTimerRef.current) {
+          clearInterval(calibTimerRef.current);
+          calibTimerRef.current = null;
+        }
         const cur = rawTiltRef.current;
         calibRef.current = { pitch: cur.pitch, roll: cur.roll };
         saveCalibration(calibRef.current);
@@ -216,6 +224,16 @@ export default function Game() {
       }
     }, 700);
   };
+
+  // Cleanup calibration timer on unmount
+  useEffect(() => {
+    return () => {
+      if (calibTimerRef.current) {
+        clearInterval(calibTimerRef.current);
+        calibTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const resetWorld = () => {
     objectsRef.current = [];
