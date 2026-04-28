@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -29,7 +29,7 @@ import {
 export default function Skins() {
   const router = useRouter();
   const [progress, setProgress] = useState<Progress | null>(null);
-  const shimmer = useRef(new Animated.Value(0)).current;
+  const shimmer = useMemo(() => new Animated.Value(0), []);
   const [shimmerVal, setShimmerVal] = useState(0);
 
   const refresh = useCallback(() => {

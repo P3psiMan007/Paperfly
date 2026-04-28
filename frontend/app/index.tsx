@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   Pressable,
   Animated,
   Easing,
+  Platform,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -24,8 +25,8 @@ import {
 export default function Index() {
   const router = useRouter();
   const [progress, setProgress] = useState<Progress>(DEFAULT_PROGRESS);
-  const bobAnim = useRef(new Animated.Value(0)).current;
-  const shimmer = useRef(new Animated.Value(0)).current;
+  const bobAnim = useMemo(() => new Animated.Value(0), []);
+  const shimmer = useMemo(() => new Animated.Value(0), []);
   const [shimmerVal, setShimmerVal] = useState(0);
 
   const refresh = useCallback(() => {
@@ -34,19 +35,20 @@ export default function Index() {
 
   useEffect(() => {
     refresh();
+    const useNative = Platform.OS !== "web";
     Animated.loop(
       Animated.sequence([
         Animated.timing(bobAnim, {
           toValue: 1,
           duration: 1800,
           easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
+          useNativeDriver: useNative,
         }),
         Animated.timing(bobAnim, {
           toValue: 0,
           duration: 1800,
           easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
+          useNativeDriver: useNative,
         }),
       ])
     ).start();

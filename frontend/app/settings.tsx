@@ -214,4 +214,35 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     lineHeight: 22,
   },
+  calibSteps: {
+    backgroundColor: "rgba(181,255,252,0.35)",
+    borderColor: "#0F172A",
+    borderWidth: 2,
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 6,
+    gap: 6,
+  },
+  calibStep: {
+    color: "#0F172A",
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 19,
+  },
+  calibStepNum: {
+    fontWeight: "900",
+    color: "#0F172A",
+  },
+  calibStrong: {
+    fontWeight: "900",
+    color: "#0F172A",
+  },
+  calibTip: {
+    color: "#0F172A",
+    fontSize: 12,
+    fontStyle: "italic",
+    fontWeight: "600",
+    opacity: 0.75,
+    marginTop: 4,
+  },
 });

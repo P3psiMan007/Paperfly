@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -83,7 +83,7 @@ export default function Game() {
   const [calibrating, setCalibrating] = useState(false);
   const [calibCountdown, setCalibCountdown] = useState(3);
   const [shimmerVal, setShimmerVal] = useState(0);
-  const shimmerAnim = useRef(new Animated.Value(0)).current;
+  const shimmerAnim = useMemo(() => new Animated.Value(0), []);
 
   const sensRef = useRef(1.0);
   const calibRef = useRef<Calibration>({ pitch: 0, roll: 0 });
@@ -681,8 +681,32 @@ export default function Game() {
         <Overlay SW={SW}>
           <Text style={styles.overlayTitle}>Ready?</Text>
           <Text style={styles.overlaySub}>
-            Hold the screen to boost. Tilt to steer.
+            Tilt to steer · Hold screen to boost
           </Text>
+          <View
+            style={{
+              backgroundColor: "rgba(181,255,252,0.45)",
+              borderColor: "#0F172A",
+              borderWidth: 2,
+              borderRadius: 12,
+              padding: 10,
+              marginBottom: 10,
+            }}
+          >
+            <Text
+              style={{
+                fontSize: 12,
+                color: "#0F172A",
+                fontWeight: "700",
+                textAlign: "center",
+                lineHeight: 17,
+              }}
+            >
+              Tip: tap{" "}
+              <Text style={{ fontWeight: "900" }}>Calibrate</Text> first while
+              holding the phone in your natural pose.
+            </Text>
+          </View>
           <View style={styles.overlayBtnRow}>
             <TouchableOpacity
               style={styles.primaryBtn}
@@ -717,6 +741,12 @@ export default function Game() {
         >
           <Text style={styles.calibrationText}>HOLD STEADY</Text>
           <Text style={styles.calibrationCount}>{calibCountdown}</Text>
+          <Text style={styles.calibrationHint}>
+            Hold the phone in your natural play pose
+          </Text>
+          <Text style={styles.calibrationHintSmall}>
+            This becomes your new neutral
+          </Text>
         </View>
       )}
 
@@ -1237,5 +1267,22 @@ const styles = StyleSheet.create({
     fontSize: 110,
     fontWeight: "900",
     color: "#0F172A",
+  },
+  calibrationHint: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#0F172A",
+    marginTop: 14,
+    textAlign: "center",
+    paddingHorizontal: 30,
+  },
+  calibrationHintSmall: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#0F172A",
+    opacity: 0.65,
+    marginTop: 4,
+    textAlign: "center",
+    paddingHorizontal: 30,
   },
 });
