@@ -119,15 +119,19 @@ export default function Game() {
     loadProgress().then(setProgress);
     // Shimmer for skin animation
     const id = shimmerAnim.addListener(({ value }) => setShimmerVal(value));
-    Animated.loop(
+    const loop = Animated.loop(
       Animated.timing(shimmerAnim, {
         toValue: 1,
         duration: 3500,
         easing: Easing.linear,
         useNativeDriver: false,
       })
-    ).start();
-    return () => shimmerAnim.removeListener(id);
+    );
+    loop.start();
+    return () => {
+      loop.stop();
+      shimmerAnim.removeListener(id);
+    };
   }, [shimmerAnim]);
 
   // Sensor subscription — prefer DeviceMotion (gravity-compensated, more stable)

@@ -45,15 +45,19 @@ export default function Skins() {
   useEffect(() => {
     refresh();
     const id = shimmer.addListener(({ value }) => setShimmerVal(value));
-    Animated.loop(
+    const loop = Animated.loop(
       Animated.timing(shimmer, {
         toValue: 1,
         duration: 3500,
         easing: Easing.linear,
         useNativeDriver: false,
       })
-    ).start();
-    return () => shimmer.removeListener(id);
+    );
+    loop.start();
+    return () => {
+      loop.stop();
+      shimmer.removeListener(id);
+    };
   }, [refresh, shimmer]);
 
   const equip = async (id: Skin["id"]) => {

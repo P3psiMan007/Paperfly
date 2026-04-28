@@ -36,7 +36,7 @@ export default function Index() {
   useEffect(() => {
     refresh();
     const useNative = Platform.OS !== "web";
-    Animated.loop(
+    const bobLoop = Animated.loop(
       Animated.sequence([
         Animated.timing(bobAnim, {
           toValue: 1,
@@ -51,17 +51,23 @@ export default function Index() {
           useNativeDriver: useNative,
         }),
       ])
-    ).start();
+    );
+    bobLoop.start();
     const id = shimmer.addListener(({ value }) => setShimmerVal(value));
-    Animated.loop(
+    const shimmerLoop = Animated.loop(
       Animated.timing(shimmer, {
         toValue: 1,
         duration: 3500,
         easing: Easing.linear,
         useNativeDriver: false,
       })
-    ).start();
-    return () => shimmer.removeListener(id);
+    );
+    shimmerLoop.start();
+    return () => {
+      bobLoop.stop();
+      shimmerLoop.stop();
+      shimmer.removeListener(id);
+    };
   }, [refresh, bobAnim, shimmer]);
 
   useFocusEffect(
