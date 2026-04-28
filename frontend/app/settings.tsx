@@ -84,6 +84,31 @@ export default function Settings() {
               Pitch: {calibration.pitch.toFixed(3)} · Roll:{" "}
               {calibration.roll.toFixed(3)}
             </Text>
+            <View style={styles.calibSteps}>
+              <Text style={styles.calibStep}>
+                <Text style={styles.calibStepNum}>1.</Text>  Sit comfortably and
+                hold the phone the way you'll play (usually tilted slightly
+                toward you).
+              </Text>
+              <Text style={styles.calibStep}>
+                <Text style={styles.calibStepNum}>2.</Text>  Tap{" "}
+                <Text style={styles.calibStrong}>Recalibrate Now</Text>.
+              </Text>
+              <Text style={styles.calibStep}>
+                <Text style={styles.calibStepNum}>3.</Text>  Hold absolutely
+                still during the 3-2-1 countdown — that pose becomes your new
+                neutral.
+              </Text>
+              <Text style={styles.calibStep}>
+                <Text style={styles.calibStepNum}>4.</Text>  After the countdown
+                finishes, the plane will fly straight when you hold that pose.
+                Tilt left/right to steer, forward/back to climb/descend.
+              </Text>
+              <Text style={styles.calibTip}>
+                Tip: Recalibrate any time the plane drifts on its own — usually
+                means your "neutral" pose has shifted.
+              </Text>
+            </View>
             <TouchableOpacity
               style={styles.actionBtn}
               onPress={() =>
