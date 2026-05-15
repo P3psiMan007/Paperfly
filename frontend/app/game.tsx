@@ -565,6 +565,19 @@ export default function Game() {
               : powerup
               ? POWERUP_THEME[powerup].color
               : "#FFFFFF";
+          // Obstacle behavior: 25 % drift (slow lateral motion), 10 % split.
+          // Drift and split can both apply to the same obstacle.
+          let vx: number | undefined;
+          let willSplit = false;
+          if (type === "obstacle") {
+            if (rand() < 0.25) {
+              const dir = rand() < 0.5 ? -1 : 1;
+              vx = dir * (35 + rand() * 35); // 35–70 world units / sec
+            }
+            if (rand() < 0.1) {
+              willSplit = true;
+            }
+          }
           objectsRef.current.push({
             id: nextId++,
             type,
@@ -574,6 +587,8 @@ export default function Game() {
             baseSize,
             hue,
             powerup,
+            vx,
+            willSplit,
           });
         }
 
@@ -609,6 +624,54 @@ export default function Game() {
           if (magnetActive && o.type === "ring" && o.z < 350) {
             o.x += (planeWorldX - o.x) * 0.07;
             o.y += (planeWorldY - o.y) * 0.07;
+          }
+          // Obstacle drift: apply lateral velocity. Bounce when crossing the
+          // spawn extent so they stay roughly in play.
+          if (o.type === "obstacle" && o.vx) {
+            o.x += o.vx * effectiveDt;
+            const limit = PLANE_X_RANGE * 1.3;
+            if (o.x > limit) {
+              o.x = limit;
+              o.vx = -o.vx;
+            } else if (o.x < -limit) {
+              o.x = -limit;
+              o.vx = -o.vx;
+            }
+          }
+          // Splitter: at close range, fire once into two smaller pieces that
+          // drift apart, then mark hasSplit so it won't re-fire.
+          if (
+            o.type === "obstacle" &&
+            o.willSplit &&
+            !o.hasSplit &&
+            o.z < 250
+          ) {
+            o.hasSplit = true;
+            const childSize = o.baseSize * 0.62;
+            const childVx = 70 + Math.random() * 25;
+            objectsRef.current.push({
+              id: nextId++,
+              type: "obstacle",
+              x: o.x,
+              y: o.y,
+              z: o.z + 4,
+              baseSize: childSize,
+              hue: o.hue,
+              vx: -childVx,
+            });
+            objectsRef.current.push({
+              id: nextId++,
+              type: "obstacle",
+              x: o.x,
+              y: o.y,
+              z: o.z + 4,
+              baseSize: childSize,
+              hue: o.hue,
+              vx: childVx,
+            });
+            // Remove the original; the two children replace it.
+            objs.splice(i, 1);
+            continue;
           }
           // Collision window slightly wider than before (was z<50). Objects move
           // fast at close range, so we start checking a bit earlier.
@@ -863,6 +926,10 @@ export default function Game() {
               backgroundColor: o.hue,
               opacity: 0.55 + 0.45 * opacity,
               pointerEvents: "none",
+              // Splitters get a brighter outline so the player can read them
+              // before they break apart.
+              borderColor: o.willSplit && !o.hasSplit ? "#FDE047" : "#0F172A",
+              borderWidth: o.willSplit && !o.hasSplit ? 3 : 2,
             },
           ]}
         />

@@ -25,6 +25,13 @@ export type WorldObj = {
   hue?: string;
   // For type === "powerup": which effect collecting it grants.
   powerup?: PowerupKind;
+  // For type === "obstacle": optional lateral world-units-per-second drift.
+  // Positive = drifting right, negative = drifting left, undefined = static.
+  vx?: number;
+  // If true the obstacle will split into two smaller pieces when it reaches
+  // a close-range threshold (z < 250) and then never splits again.
+  willSplit?: boolean;
+  hasSplit?: boolean;
 };
 
 // Durations (ms) each powerup stays active after pickup.
