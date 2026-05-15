@@ -1,0 +1,160 @@
+{
+  "$comment": "Handoff briefing for the next Claude Code session on this repo. Open the desktop/CLI Claude Code app on Paperfly, paste this whole file as the first message, then proceed.",
+
+  "session_meta": {
+    "repo": "P3psiMan007/Paperfly",
+    "branch": "claude/analyze-repo-XUaww",
+    "base": "main",
+    "remote_state": "pushed and up to date as of handoff",
+    "open_pr": null,
+    "primary_working_dir": "/home/user/Paperfly (use repo root on your machine)"
+  },
+
+  "what_was_just_shipped": {
+    "summary": "Three back-to-back gameplay layers landed in this branch. The game now has player progression (combo + skins), tactical choice (power-ups), visual variety (env phases), and harder reads (drift/splitter obstacles). Tuning has NOT been validated on-device yet.",
+    "commits_in_order": [
+      "e4e844d feat: 4 new skins, combo multiplier, 3 new achievements",
+      "7cfc17a feat(game): power-ups (shield, magnet, slow-mo)",
+      "3672e92 feat(game): dynamic sky environments shift with score",
+      "d31283c feat(game): drifting and splitting obstacles"
+    ],
+    "subsystems": {
+      "skins": "11 total (6 free, 5 rare). Unlock conditions in frontend/src/game/skins.ts span levels 3-12 + combo/ring/score/survival achievements.",
+      "combo": "Chained coin collection. ×1 -> ×5 at a 12-coin streak. 4-second lapse window. Refs: comboRef, comboExpiresRef in frontend/app/game.tsx ~line 139.",
+      "powerups": "shield / magnet / slowmo. ~5 % of spawned objects. Refs: shieldRef, magnetUntilRef, slowmoUntilRef. Effective dt is used everywhere, so slow-mo correctly scales drift + spawn pacing.",
+      "environments": "Dawn -> Day -> Sunset -> Night -> Storm. Table in frontend/src/game/environment.ts. Game loop pushes to React state only on bucket change. LinearGradient.colors and ParallaxClouds.cloudColor both follow env.",
+      "obstacles": "25 % drift (lateral vx 35-70 units/s, bounce at PLANE_X_RANGE * 1.3), 10 % split (spawns 2 children at z<250 with vx +/-70, child size = parent * 0.62). Both behaviors stack."
+    }
+  },
+
+  "next_session_goal": {
+    "theme": "Polish & juice. No new systems. Make the existing ones FEEL better. Goal: a 60-second run should have at least 3-4 moments that make the player smile or grip the phone tighter.",
+    "non_goals": [
+      "Do NOT add daily challenges, missions, leaderboards, or new obstacle types.",
+      "Do NOT rebalance difficulty curves yet (speedRef ramp, spawn density). Tuning constants only when explicitly listed below.",
+      "Do NOT refactor projection.ts or the useGameLoop pattern. They are load-bearing.",
+      "Do NOT add backend/Supabase calls. This is a client-side polish pass."
+    ],
+    "definition_of_done": "Each polish item below shipped as its own commit on the same branch, pushed, and verified by starting the dev server (npx expo start) and confirming it on a real phone via Expo Go. Type check passes (cd frontend && yarn tsc --noEmit)."
+  },
+
+  "first_tasks_in_order": [
+    {
+      "id": 1,
+      "title": "Tune power-up spawn rate down",
+      "why": "5 % feels too generous in playtesting notes. Power-ups should feel rare-but-earned, not constant.",
+      "file": "frontend/app/game.tsx",
+      "line_hint": "~line 547 in the spawn block: `if (r0 < 0.05)`",
+      "change": "Drop to 0.03 (3 %). Also adjust the ring/obstacle split: `else if (r0 < 0.60)` instead of 0.62, to keep obstacles at ~37 %.",
+      "validation": "Play a 60s run. You should see ~1-2 power-ups, not 4-5."
+    },
+    {
+      "id": 2,
+      "title": "Make splitter visual unmissable",
+      "why": "Yellow border (3px) does not read clearly in motion. Player gets hit by a child obstacle and feels cheated.",
+      "file": "frontend/app/game.tsx",
+      "line_hint": "~line 931, the splitter borderColor branch in the obstacle render.",
+      "change_options": [
+        "Pulse the border opacity using a sine of `now * 0.008` so it visibly throbs.",
+        "Render a small inner crosshair/X line on top (2 thin Views forming an X) for splitters.",
+        "Tint the fill itself slightly desaturated + add a thin glow View behind via shadowColor + elevation (already in styles)."
+      ],
+      "recommended": "Combine #1 (pulsing border) with a brighter fill hue when willSplit && !hasSplit. Keep it cheap — no animations API, just compute in render from `now`.",
+      "validation": "On a phone, splitters should be obvious from spawn distance. A friend watching over your shoulder should be able to point them out."
+    },
+    {
+      "id": 3,
+      "title": "Combo tier-up moment",
+      "why": "Hitting ×3, ×4, ×5 currently just updates a number. Should feel like a milestone.",
+      "file": "frontend/app/game.tsx",
+      "line_hint": "Search for `comboRef.current += 1` (~line 700-720). The popup is queued there.",
+      "change": "When the combo tier increases (combo crosses 3, 7, 12 -> the breakpoints used for the ×2/×3/×4/×5 multiplier in the existing scoring formula — verify in code), push an extra popup with label like 'COMBO ×2!', and trigger a one-shot haptic via expo-haptics (already in package.json — confirm). Also briefly scale the score HUD via a transient state.",
+      "subtasks": [
+        "Add a comboTierRef to track the last announced tier so we don't re-fire on every coin.",
+        "On tier increase: haptic Notification(Success), queue tier popup, set scoreFlashUntilRef = now + 350.",
+        "In the HUD render, read scoreFlashUntilRef via state (or a ref-driven re-render trick) and apply a transform: scale(1.15) for the flash window."
+      ],
+      "validation": "Picking up the 3rd coin in a streak should produce a clearly audible/tactile tier-up. Same at 7 and 12."
+    },
+    {
+      "id": 4,
+      "title": "Environment phase transition flash",
+      "why": "Crossing into Sunset/Night currently shows only a text popup. The sky change itself is abrupt.",
+      "file": "frontend/app/game.tsx",
+      "line_hint": "~line 520 where `if (nextEnv.id !== envIdRef.current)` fires.",
+      "change": "On phase change, set a `phaseFlashUntilRef = now + 600`. Render a full-screen white View on top with opacity that fades from 0.45 -> 0 over the 600ms window. Also haptic Notification(Warning) to mark the shift.",
+      "extra_polish": "The label popup ('NIGHT SKY') is currently the same size as score popups. Bump it up: bigger font, center it, fade in/out instead of float up. Consider a dedicated popup `kind` field on PopupItem.",
+      "validation": "Hitting 500 / 1500 / 3000 / 6000 score should feel like an act break, not just a UI tick."
+    },
+    {
+      "id": 5,
+      "title": "Ring collect burst",
+      "why": "Coins disappear silently. Each grab is the core loop reward — it should pop.",
+      "file": "frontend/app/game.tsx (or new frontend/src/game/Particles.tsx)",
+      "change": "On coin collect, spawn 5-7 short-lived particle Views (lifetime 250ms) that radiate outward from the collect point with vx/vy randomized. Store in a particlesRef array updated in the same game loop tick. Render as plain absolutely-positioned Views — no SVG, no Reanimated.",
+      "scope_guard": "Keep particles dumb: position, lifetime, color. No physics. Reuse the same struct shape as popupsRef.",
+      "validation": "Coin grab should feel like a small firework. Combo tier-ups should make the particle count bigger (multiply by combo tier)."
+    },
+    {
+      "id": 6,
+      "title": "Near-miss bonus",
+      "why": "Threading between two close obstacles is the most exciting moment a runner has. Currently nothing rewards it.",
+      "file": "frontend/app/game.tsx",
+      "line_hint": "In the per-frame loop, the obstacle collision block (~line 630).",
+      "change": "When an obstacle passes the plane's Z plane (just behind, say z dropped below 30 last frame) AND the screen-space distance between plane and obstacle center was < 90 px at min, award +25, queue a 'NEAR MISS +25' popup, haptic light impact.",
+      "scope_guard": "Track per-obstacle `closestDist` and `passed` flags. Don't fire more than once per obstacle. Don't fire while shield is active (the shield path uses different geometry).",
+      "validation": "Squeezing past a wall on either side should give a tiny rush + score bump."
+    }
+  ],
+
+  "conventions_to_respect": {
+    "state_vs_refs": "Anything that mutates every frame lives in a useRef (objectsRef, popupsRef, speedRef, comboRef, *UntilRef). React state is reserved for things that should trigger a re-render (HUD numbers, env, shieldActive). NEVER setState every frame.",
+    "effective_dt": "All time-based math must multiply by `effectiveDt`, not raw dt. Slow-mo scales effectiveDt by 0.45. Drift, spawn timer, env progression, particles all need this.",
+    "projection": "Screen position is `cxNow + (o.x - planeWorldX * 0.4) * scale`, `scale = FOCAL / o.z`. Constants are in frontend/src/game/projection.ts. Do not duplicate this math elsewhere — import from projection.ts.",
+    "spawn_pipeline": "All world objects go through the single spawn block ~line 540 of game.tsx. New behaviors should be flags on WorldObj (see willSplit/hasSplit/vx in projection.ts), not new top-level systems.",
+    "performance_budget": "Target 60 fps on a mid-tier Android. Don't add Reanimated, Skia, or SVG. Plain Views + transforms only. Render functions for objects are mapped from objectsRef each frame — keep per-object work cheap.",
+    "no_new_files_unless_needed": "Prefer extending existing modules (Hud.tsx, environment.ts, projection.ts). Only create a new file if the concept is genuinely separable (Particles.tsx is a reasonable candidate)."
+  },
+
+  "files_to_read_first": [
+    {"path": "frontend/app/game.tsx", "why": "Main game loop, spawn, collision, render. Most polish work happens here."},
+    {"path": "frontend/src/game/projection.ts", "why": "WorldObj type + projection constants. New fields go here."},
+    {"path": "frontend/src/game/Hud.tsx", "why": "HUD render. Combo tier flash and phase-transition overlay live near this."},
+    {"path": "frontend/src/game/environment.ts", "why": "Env table. Reference, do not edit without reason."},
+    {"path": "frontend/src/game/skins.ts", "why": "Skins + unlock conditions. Read only — do not add new ones."}
+  ],
+
+  "verification_steps_per_commit": [
+    "cd frontend && yarn tsc --noEmit  -- must pass",
+    "npx expo start  -- open in Expo Go on a real phone",
+    "Play one 60-90s run. Confirm the polish item is visible and feels good.",
+    "git add -A && git commit -m \"<type>(game): <change>\" && git push"
+  ],
+
+  "git_rules": {
+    "branch": "claude/analyze-repo-XUaww (DO NOT switch branches)",
+    "commit_style": "Conventional commits with a body explaining WHY. Look at recent commits in this branch for tone — they explain reasoning, not just changes.",
+    "no_pr_yet": "Do not open a PR unless the user explicitly asks. Push to the branch only.",
+    "no_amend": "Always create new commits, never amend. Each polish task = its own commit."
+  },
+
+  "known_pitfalls": [
+    "comboExpiresRef is set to `now + 4000` in ms but `now` comes from performance.now — keep units consistent.",
+    "popupsRef cleanup runs every frame (filter > 1s). New popup kinds with longer lifetimes need their own cleanup threshold or a `ttl` field.",
+    "Splitter spawns its 2 children at z = o.z + 4 to avoid an immediate re-trigger of any z<X check on the same frame. Preserve this offset.",
+    "The dailyRngRef is used for daily challenges; when present, all spawn rolls must go through it. Don't bypass it with Math.random in new code."
+  ],
+
+  "seed_questions_to_answer_at_session_start": [
+    "Did you start the dev server and load on a real phone? Polish work cannot be validated in a simulator.",
+    "After tuning power-ups to 3 %, did a 60s run still surface at least one power-up?",
+    "Does the splitter now read clearly from spawn distance, or does it still need iteration?",
+    "Do the combo tier-up haptics fire on Android AND iOS? (expo-haptics support differs)"
+  ],
+
+  "stretch_if_time_remains": [
+    "Subtle CRT/film grain over the night and storm environments only.",
+    "Tilt the plane sprite slightly more during slow-mo for a 'time bends' look.",
+    "Trail effect behind the plane that intensifies with combo tier."
+  ]
+}
