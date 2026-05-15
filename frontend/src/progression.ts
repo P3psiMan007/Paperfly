@@ -181,6 +181,8 @@ export function applyRun(
   newAch("boost_30", next.totalBoosts >= 30);
   newAch("score_500", stats.score >= 500);
   newAch("first_crash", stats.crashed);
+  newAch("score_1500", stats.score >= 1500);
+  newAch("survive_90", stats.seconds >= 90);
 
   // Skin unlocks via achievement
   const unlockedSkinsByAchievement: SkinId[] = [];

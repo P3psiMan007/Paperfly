@@ -93,19 +93,7 @@ export default function Settings() {
     try {
       const restored = await fetchSaveByCode(cleaned);
       const localNow = await loadProgress();
-      // The cloud save also tells us which premium skins the original
-      // purchasing device owns; fold them into the merged progress so a
-      // restore on a new device brings paid skins along.
-      const restoredWithSkins: Partial<Progress> = {
-        ...restored.progress,
-        ownedSkins: Array.from(
-          new Set([
-            ...(restored.progress?.ownedSkins || []),
-            ...restored.ownedSkins,
-          ])
-        ) as Progress["ownedSkins"],
-      };
-      const merged = mergeProgress(localNow, restoredWithSkins);
+      const merged = mergeProgress(localNow, restored.progress);
       await saveProgress(merged);
       setProgress(merged);
       Alert.alert(
@@ -184,7 +172,7 @@ export default function Settings() {
             <View style={styles.calibSteps}>
               <Text style={styles.calibStep}>
                 <Text style={styles.calibStepNum}>1.</Text>  Sit comfortably and
-                hold the phone the way you'll play.
+                hold the phone the way you&apos;ll play.
               </Text>
               <Text style={styles.calibStep}>
                 <Text style={styles.calibStepNum}>2.</Text>  Tap{" "}

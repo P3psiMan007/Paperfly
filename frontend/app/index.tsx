@@ -19,12 +19,10 @@ import Cloud from "../src/Cloud";
 import TutorialOverlay from "../src/Tutorial";
 import {
   loadProgress,
-  saveProgress,
   Progress,
   nextLevelInfo,
   DEFAULT_PROGRESS,
 } from "../src/progression";
-import { getOwnedSkins } from "../src/api";
 import { todaySeedString } from "../src/daily";
 
 const TUTORIAL_KEY = "@mmf_tutorial_seen";
@@ -40,18 +38,6 @@ export default function Index() {
   const refresh = useCallback(async () => {
     const p = await loadProgress();
     setProgress(p);
-    // Best-effort: pull premium skins owned on backend (post-purchase)
-    try {
-      const owned = await getOwnedSkins();
-      if (owned.length) {
-        const merged = Array.from(new Set([...p.ownedSkins, ...owned]));
-        if (merged.length !== p.ownedSkins.length) {
-          const updated = { ...p, ownedSkins: merged };
-          await saveProgress(updated);
-          setProgress(updated);
-        }
-      }
-    } catch {}
   }, []);
 
   useEffect(() => {

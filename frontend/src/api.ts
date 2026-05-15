@@ -1,4 +1,9 @@
-// Backend API client helpers
+// Backend API client helpers.
+//
+// The game ships with no in-app payments (Apple/Google forbid Stripe for
+// digital goods; we'll integrate native IAP via RevenueCat post-launch).
+// The backend's /checkout endpoints stay in place but are unused by the
+// app. Cross-device save codes still go through /save + /save/{code}.
 import { getDeviceId } from "./device";
 import type { Progress } from "./progression";
 
@@ -32,60 +37,12 @@ export async function createSaveCode(progress: Progress): Promise<string> {
 
 export type RestoredSave = {
   progress: Progress;
-  ownedSkins: string[];
 };
 
 export async function fetchSaveByCode(code: string): Promise<RestoredSave> {
   const cleaned = code.toUpperCase().trim().replace(/\s+/g, "");
-  const data = await jsonFetch<{
-    progress: Progress;
-    owned_skins?: string[];
-  }>(API(`/save/${encodeURIComponent(cleaned)}`));
-  return {
-    progress: data.progress,
-    ownedSkins: data.owned_skins || [],
-  };
-}
-
-// Copy premium-skin ownership from the original device that created a save
-// code onto the current device. Used by the "Restore Purchases" button on
-// Skins so paid skins survive an app reinstall / phone switch.
-export async function transferPurchasesByCode(code: string): Promise<string[]> {
-  const cleaned = code.toUpperCase().trim().replace(/\s+/g, "");
-  const deviceId = await getDeviceId();
-  const data = await jsonFetch<{ owned: string[] }>(API("/transfer-device"), {
-    method: "POST",
-    body: JSON.stringify({ code: cleaned, new_device_id: deviceId }),
-  });
-  return data.owned || [];
-}
-
-export async function createCheckoutSession(
-  skinId: string,
-  originUrl: string
-): Promise<{ url: string; session_id: string }> {
-  const deviceId = await getDeviceId();
-  return jsonFetch<{ url: string; session_id: string }>(API("/checkout/session"), {
-    method: "POST",
-    body: JSON.stringify({ skin_id: skinId, device_id: deviceId, origin_url: originUrl }),
-  });
-}
-
-export async function getCheckoutStatus(
-  sessionId: string
-): Promise<{
-  status: string;
-  payment_status: string;
-  skin_id?: string | null;
-  already_owned: boolean;
-}> {
-  return jsonFetch(API(`/checkout/status/${encodeURIComponent(sessionId)}`));
-}
-
-export async function getOwnedSkins(): Promise<string[]> {
-  const deviceId = await getDeviceId();
-  const data = await jsonFetch<{ owned: string[] }>(
-    API(`/owned-skins/${encodeURIComponent(deviceId)}`)
+  const data = await jsonFetch<{ progress: Progress }>(
+    API(`/save/${encodeURIComponent(cleaned)}`)
   );
-  return data.owned || [];
+  return { progress: data.progress };
 }

@@ -1,6 +1,7 @@
 // Skins catalog for Mr. Maybe Flight.
-// Free skins are unlocked via XP levels or achievements.
-// Premium skins are flagged for "Coming Soon" (no payment wired yet).
+// All skins are free — they're earned by XP levels or one-run achievements.
+// The 'rare' tier just means a harder unlock; visually they have animated
+// flair (shimmer / flame / galaxy) to feel like a real reward.
 
 export type SkinId =
   | "origami"
@@ -28,19 +29,22 @@ export type AchievementId =
   | "survive_60"
   | "boost_30"
   | "score_500"
-  | "first_crash";
+  | "first_crash"
+  | "score_1500"
+  | "survive_90";
 
 export type SkinUnlock =
   | { kind: "default" }
   | { kind: "level"; level: number }
-  | { kind: "achievement"; id: AchievementId }
-  | { kind: "premium" };
+  | { kind: "achievement"; id: AchievementId };
 
 export type Skin = {
   id: SkinId;
   name: string;
   tagline: string;
-  type: "free" | "premium";
+  // 'rare' = the previously-premium skins. Same data shape as 'free' (they're
+  // earnable), just rendered in a separate UI section so they feel special.
+  tier: "free" | "rare";
   unlock: SkinUnlock;
   palette: SkinPalette;
   flair: SkinFlair;
@@ -70,6 +74,14 @@ export const ACHIEVEMENTS: Record<
     name: "Welcome Aboard",
     description: "Survive your first crash",
   },
+  score_1500: {
+    name: "Ace Pilot",
+    description: "Reach 1,500 score in a single run",
+  },
+  survive_90: {
+    name: "Marathon Flyer",
+    description: "Survive 90 seconds in a single run",
+  },
 };
 
 export const SKINS: Record<SkinId, Skin> = {
@@ -77,7 +89,7 @@ export const SKINS: Record<SkinId, Skin> = {
     id: "origami",
     name: "Origami",
     tagline: "The classic paper plane",
-    type: "free",
+    tier: "free",
     unlock: { kind: "default" },
     flair: "plain",
     palette: {
@@ -91,7 +103,7 @@ export const SKINS: Record<SkinId, Skin> = {
     id: "skyblue",
     name: "Skyliner",
     tagline: "Cool blue sky cruiser",
-    type: "free",
+    tier: "free",
     unlock: { kind: "level", level: 3 },
     flair: "plain",
     palette: {
@@ -104,8 +116,8 @@ export const SKINS: Record<SkinId, Skin> = {
   mint: {
     id: "mint",
     name: "Mint Glider",
-    tagline: "Achievement: 25 rings collected",
-    type: "free",
+    tagline: "Collect 25 rings (lifetime)",
+    tier: "free",
     unlock: { kind: "achievement", id: "rings_25" },
     flair: "plain",
     palette: {
@@ -119,7 +131,7 @@ export const SKINS: Record<SkinId, Skin> = {
     id: "crimson",
     name: "Crimson Dart",
     tagline: "Reach Level 8",
-    type: "free",
+    tier: "free",
     unlock: { kind: "level", level: 8 },
     flair: "plain",
     palette: {
@@ -132,9 +144,9 @@ export const SKINS: Record<SkinId, Skin> = {
   aurora: {
     id: "aurora",
     name: "Aurora",
-    tagline: "Holographic shimmer",
-    type: "premium",
-    unlock: { kind: "premium" },
+    tagline: "Reach Level 12 · holographic shimmer",
+    tier: "rare",
+    unlock: { kind: "level", level: 12 },
     flair: "shimmer",
     palette: {
       wingLight: "#FCE7F3",
@@ -148,9 +160,9 @@ export const SKINS: Record<SkinId, Skin> = {
   phoenix: {
     id: "phoenix",
     name: "Phoenix",
-    tagline: "Flame trail · burning hot",
-    type: "premium",
-    unlock: { kind: "premium" },
+    tagline: "Score 1,500 in one run · flame trail",
+    tier: "rare",
+    unlock: { kind: "achievement", id: "score_1500" },
     flair: "flame",
     palette: {
       wingLight: "#FFEDD5",
@@ -164,9 +176,9 @@ export const SKINS: Record<SkinId, Skin> = {
   galaxy: {
     id: "galaxy",
     name: "Galaxy",
-    tagline: "Deep space, twinkling stars",
-    type: "premium",
-    unlock: { kind: "premium" },
+    tagline: "Survive 90 seconds · twinkling stars",
+    tier: "rare",
+    unlock: { kind: "achievement", id: "survive_90" },
     flair: "galaxy",
     palette: {
       wingLight: "#312E81",
@@ -189,7 +201,5 @@ export function unlockSummary(s: Skin): string {
       return `Reach Level ${s.unlock.level}`;
     case "achievement":
       return ACHIEVEMENTS[s.unlock.id].description;
-    case "premium":
-      return "Premium · Coming Soon";
   }
 }

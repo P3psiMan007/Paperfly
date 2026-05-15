@@ -18,7 +18,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { Accelerometer, DeviceMotion } from "expo-sensors";
 import * as Haptics from "expo-haptics";
 import PaperPlane from "../src/PaperPlane";
-import Cloud from "../src/Cloud";
 import {
   FOCAL,
   FAR_Z,
@@ -38,6 +37,7 @@ import {
   BoostLines,
   ParallaxClouds,
 } from "../src/game/Hud";
+import { Coin } from "../src/game/Coin";
 import {
   loadCalibration,
   saveCalibration,
@@ -57,12 +57,18 @@ import { mulberry32, todaySeed, todaySeedString } from "../src/daily";
 import { playSfx, preloadSounds, loadSfxEnabled } from "../src/audio";
 
 // Map of which skins unlock from which achievement (kept here to avoid circular imports)
+// Which achievement unlocks which skin. The reverse map (skin -> achievement)
+// must be in sync with src/skins.ts; we keep it here as the canonical lookup
+// the run-resolver uses.
 const SKIN_BY_ACHIEVEMENT: Partial<Record<SkinId, AchievementId>> = {
   mint: "rings_25",
+  phoenix: "score_1500",
+  galaxy: "survive_90",
 };
 const SKINS_BY_LEVEL: { id: SkinId; level: number }[] = [
   { id: "skyblue", level: 3 },
   { id: "crimson", level: 8 },
+  { id: "aurora", level: 12 },
 ];
 
 let nextId = 1;
@@ -569,6 +575,10 @@ export default function Game() {
     return () => {
       if (raf) cancelAnimationFrame(raf);
     };
+    // The loop runs once for the lifetime of this screen and reads game state
+    // through refs. Including endGame would tear down and recreate the loop
+    // every render, which would lose frame timing and start the world over.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Touch handlers
@@ -632,26 +642,28 @@ export default function Game() {
       const size = o.baseSize * scale;
       const opacity = Math.min(1, (FAR_Z - o.z) / 600);
       if (o.type === "ring") {
-        const pulse = 1 + Math.sin(performance.now() / 220 + o.id) * 0.06;
-        const rsize = size * pulse;
+        // Subtle pulse 0..1 fed to the Coin (drives the inner highlight, not
+        // the disc size — keeping size stable so hit-feel stays predictable).
+        const pulse =
+          0.5 + 0.5 * Math.sin(performance.now() / 260 + o.id * 0.7);
         return (
           <View
             key={o.id}
-            style={[
-              styles.ring,
-              {
-                left: sx - rsize / 2,
-                top: sy - rsize / 2,
-                width: rsize,
-                height: rsize,
-                borderRadius: rsize / 2,
-                borderWidth: Math.max(3, rsize * 0.18),
-                borderColor: o.hue,
-                opacity: 0.55 + 0.45 * opacity,
-                pointerEvents: "none",
-              },
-            ]}
-          />
+            style={{
+              position: "absolute",
+              left: sx - size / 2,
+              top: sy - size / 2,
+              width: size,
+              height: size,
+              pointerEvents: "none",
+            }}
+          >
+            <Coin
+              size={size}
+              pulse={pulse}
+              opacity={0.6 + 0.4 * opacity}
+            />
+          </View>
         );
       }
       return (
@@ -853,8 +865,9 @@ export default function Game() {
           <Text style={styles.overlayEyebrow}>NO TILT SENSOR</Text>
           <Text style={styles.overlayTitle}>Open on your phone</Text>
           <Text style={styles.overlaySub}>
-            Mr. Maybe Flight uses your phone's tilt sensor to steer. We can't
-            detect one here — try opening this on an iOS or Android device.
+            Mr. Maybe Flight uses your phone&apos;s tilt sensor to steer. We
+            can&apos;t detect one here — try opening this on an iOS or
+            Android device.
           </Text>
           <View
             style={{
@@ -869,7 +882,7 @@ export default function Game() {
           >
             <Text style={styles.noSensorTip}>
               On iOS Safari you may need to grant Motion &amp; Orientation
-              permission in your phone's Settings → Safari.
+              permission in your phone&apos;s Settings → Safari.
             </Text>
           </View>
           <TouchableOpacity
@@ -1183,7 +1196,6 @@ const styles = StyleSheet.create({
     borderRadius: PLANE_SIZE,
     backgroundColor: "rgba(255,255,255,0.35)",
   },
-  ring: { position: "absolute", backgroundColor: "transparent" },
   obstacle: {
     position: "absolute",
     borderWidth: 2,

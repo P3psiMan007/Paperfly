@@ -54,32 +54,36 @@ export default function PaperPlane({
       <Svg width={size} height={size} viewBox="0 0 100 100">
         <Defs>
           <LinearGradient id={`light-${skin.id}`} x1="0" y1="0" x2="1" y2="1">
-            {shimmerStops ? (
-              shimmerStops.map((s, i) => (
-                <Stop key={i} offset={s.offset} stopColor={s.c} />
-              ))
-            ) : (
-              <>
-                <Stop offset="0" stopColor={p.wingLight} />
-                <Stop offset="1" stopColor={shadeMix(p.wingLight, p.wingDark, 0.35)} />
-              </>
-            )}
+            {shimmerStops
+              ? shimmerStops.map((s, i) => (
+                  <Stop key={i} offset={s.offset} stopColor={s.c} />
+                ))
+              : [
+                  <Stop key="a" offset="0" stopColor={p.wingLight} />,
+                  <Stop
+                    key="b"
+                    offset="1"
+                    stopColor={shadeMix(p.wingLight, p.wingDark, 0.35)}
+                  />,
+                ]}
           </LinearGradient>
           <LinearGradient id={`dark-${skin.id}`} x1="0" y1="0" x2="1" y2="1">
-            {shimmerStops ? (
-              shimmerStops.map((s, i) => (
-                <Stop
-                  key={i}
-                  offset={s.offset}
-                  stopColor={shadeMix(s.c, "#0F172A", 0.25)}
-                />
-              ))
-            ) : (
-              <>
-                <Stop offset="0" stopColor={p.wingDark} />
-                <Stop offset="1" stopColor={shadeMix(p.wingDark, "#0F172A", 0.3)} />
-              </>
-            )}
+            {shimmerStops
+              ? shimmerStops.map((s, i) => (
+                  <Stop
+                    key={i}
+                    offset={s.offset}
+                    stopColor={shadeMix(s.c, "#0F172A", 0.25)}
+                  />
+                ))
+              : [
+                  <Stop key="a" offset="0" stopColor={p.wingDark} />,
+                  <Stop
+                    key="b"
+                    offset="1"
+                    stopColor={shadeMix(p.wingDark, "#0F172A", 0.3)}
+                  />,
+                ]}
           </LinearGradient>
           {skin.flair === "flame" && (
             <LinearGradient id="flame-grad" x1="0" y1="0" x2="0" y2="1">
@@ -90,8 +94,8 @@ export default function PaperPlane({
           )}
         </Defs>
 
-        {/* Glow halo for premium */}
-        {skin.type === "premium" && p.glow && (
+        {/* Glow halo for rare skins (Aurora / Phoenix / Galaxy) */}
+        {skin.tier === "rare" && p.glow && (
           <Circle cx="50" cy="50" r="46" fill={p.glow} opacity={0.18} />
         )}
 

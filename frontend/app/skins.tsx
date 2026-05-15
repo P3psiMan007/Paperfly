@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -7,16 +7,11 @@ import {
   ScrollView,
   Animated,
   Easing,
-  Alert,
-  ActivityIndicator,
-  Modal,
-  TextInput,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import * as WebBrowser from "expo-web-browser";
 import PaperPlane from "../src/PaperPlane";
 import {
   loadProgress,
@@ -30,57 +25,15 @@ import {
   unlockSummary,
   ACHIEVEMENTS,
 } from "../src/skins";
-import {
-  createCheckoutSession,
-  getCheckoutStatus,
-  getOwnedSkins,
-  transferPurchasesByCode,
-} from "../src/api";
 
 export default function Skins() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ session_id?: string; cancelled?: string }>();
   const [progress, setProgress] = useState<Progress | null>(null);
   const shimmer = useMemo(() => new Animated.Value(0), []);
   const [shimmerVal, setShimmerVal] = useState(0);
-  const [purchasing, setPurchasing] = useState<string | null>(null);
-  const [polling, setPolling] = useState(false);
-  const pollAttemptsRef = useRef(0);
-  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pollCancelledRef = useRef(false);
-
-  // Restore-purchases modal state.
-  const [restoreOpen, setRestoreOpen] = useState(false);
-  const [restoreInput, setRestoreInput] = useState("");
-  const [restoreRunning, setRestoreRunning] = useState(false);
-
-  // Stop any in-flight Stripe poll when this screen unmounts so we don't
-  // call setState / show Alerts on a screen that's already gone.
-  useEffect(() => {
-    return () => {
-      pollCancelledRef.current = true;
-      if (pollTimerRef.current) {
-        clearTimeout(pollTimerRef.current);
-        pollTimerRef.current = null;
-      }
-    };
-  }, []);
 
   const refresh = useCallback(async () => {
     const p = await loadProgress();
-    // Sync owned premium skins from backend
-    try {
-      const owned = await getOwnedSkins();
-      if (owned.length) {
-        const merged = Array.from(new Set([...p.ownedSkins, ...(owned as any)]));
-        if (merged.length !== p.ownedSkins.length) {
-          const updated = { ...p, ownedSkins: merged as any };
-          await saveProgress(updated);
-          setProgress(updated);
-          return;
-        }
-      }
-    } catch {}
     setProgress(p);
   }, []);
 
@@ -108,120 +61,12 @@ export default function Skins() {
     };
   }, [refresh, shimmer]);
 
-  // Handle return from Stripe checkout
-  useEffect(() => {
-    if (params.session_id) {
-      pollPaymentStatus(params.session_id as string);
-    } else if (params.cancelled === "1") {
-      Alert.alert("Payment cancelled");
-      router.setParams({ cancelled: undefined });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.session_id, params.cancelled]);
-
-  const pollPaymentStatus = async (sessionId: string) => {
-    setPolling(true);
-    pollAttemptsRef.current = 0;
-    pollCancelledRef.current = false;
-    const tick = async () => {
-      if (pollCancelledRef.current) return;
-      pollAttemptsRef.current += 1;
-      try {
-        const s = await getCheckoutStatus(sessionId);
-        if (pollCancelledRef.current) return;
-        if (s.payment_status === "paid") {
-          await refresh();
-          if (pollCancelledRef.current) return;
-          Alert.alert(
-            "Purchase complete!",
-            s.skin_id ? `Unlocked ${s.skin_id} skin.` : "Skin unlocked."
-          );
-          setPolling(false);
-          router.setParams({ session_id: undefined });
-          return;
-        }
-        if (s.status === "expired" || pollAttemptsRef.current > 8) {
-          Alert.alert(
-            "Payment status",
-            "Could not confirm payment. If you completed it, please refresh in a moment."
-          );
-          setPolling(false);
-          router.setParams({ session_id: undefined });
-          return;
-        }
-        pollTimerRef.current = setTimeout(tick, 2000);
-      } catch {
-        if (pollCancelledRef.current) return;
-        if (pollAttemptsRef.current > 8) {
-          setPolling(false);
-          router.setParams({ session_id: undefined });
-          return;
-        }
-        pollTimerRef.current = setTimeout(tick, 2000);
-      }
-    };
-    tick();
-  };
-
   const equip = async (id: Skin["id"]) => {
     if (!progress) return;
     if (!progress.ownedSkins.includes(id)) return;
     const next = { ...progress, equippedSkin: id };
     setProgress(next);
     await saveProgress(next);
-  };
-
-  const submitRestore = async () => {
-    const cleaned = restoreInput.toUpperCase().trim();
-    if (!cleaned) return;
-    setRestoreRunning(true);
-    try {
-      const owned = await transferPurchasesByCode(cleaned);
-      if (owned.length === 0) {
-        Alert.alert(
-          "Nothing to restore",
-          "We couldn't find any premium skins linked to that save code."
-        );
-      } else {
-        await refresh();
-        Alert.alert(
-          "Restored",
-          `Brought back ${owned.length} premium skin${owned.length === 1 ? "" : "s"}.`
-        );
-      }
-      setRestoreOpen(false);
-      setRestoreInput("");
-    } catch (e: any) {
-      Alert.alert(
-        "Restore failed",
-        e?.message?.startsWith("404")
-          ? "Save code not found. Double-check the code."
-          : e?.message || "Please try again."
-      );
-    } finally {
-      setRestoreRunning(false);
-    }
-  };
-
-  const buyPremium = async (skin: Skin) => {
-    setPurchasing(skin.id);
-    try {
-      const origin =
-        (process.env.EXPO_PUBLIC_BACKEND_URL || "").replace(/\/$/, "") ||
-        "https://example.com";
-      const { url } = await createCheckoutSession(skin.id, origin);
-      // Open Stripe Checkout in an in-app browser; on success we land back at /skins?session_id=...
-      const result = await WebBrowser.openBrowserAsync(url);
-      // After browser closes, refresh state (in case we already handle redirect via deep link)
-      if (result.type === "cancel" || result.type === "dismiss") {
-        // Best-effort: poll once via getOwnedSkins
-        await refresh();
-      }
-    } catch (e: any) {
-      Alert.alert("Checkout failed", e?.message || "Please try again");
-    } finally {
-      setPurchasing(null);
-    }
   };
 
   if (!progress) {
@@ -233,6 +78,8 @@ export default function Skins() {
   }
 
   const level = levelFromXp(progress.xp);
+  const freeSkins = SKIN_LIST.filter((s) => s.tier === "free");
+  const rareSkins = SKIN_LIST.filter((s) => s.tier === "rare");
 
   return (
     <LinearGradient
@@ -255,56 +102,36 @@ export default function Skins() {
           </View>
         </View>
 
-        {polling && (
-          <View style={styles.pollBanner} testID="payment-polling">
-            <ActivityIndicator size="small" color="#0F172A" />
-            <Text style={styles.pollText}>
-              Confirming your payment with Stripe…
-            </Text>
-          </View>
-        )}
-
         <ScrollView contentContainerStyle={styles.content}>
-          <Text style={styles.sectionLabel}>FREE · EARN BY PLAYING</Text>
+          <Text style={styles.sectionLabel}>EARN BY PLAYING</Text>
           <View style={styles.grid}>
-            {SKIN_LIST.filter((s) => s.type === "free").map((s) => (
+            {freeSkins.map((s) => (
               <SkinCard
                 key={s.id}
                 skin={s}
                 owned={progress.ownedSkins.includes(s.id)}
                 equipped={progress.equippedSkin === s.id}
                 onEquip={equip}
-                onBuy={buyPremium}
                 shimmerVal={shimmerVal}
-                purchasing={purchasing === s.id}
               />
             ))}
           </View>
 
-          <View style={styles.premiumHeader}>
+          <View style={styles.rareHeader}>
             <Text style={[styles.sectionLabel, { marginTop: 0 }]}>
-              PREMIUM · $2.99 EACH
+              RARE · CHALLENGE UNLOCKS
             </Text>
-            <TouchableOpacity
-              onPress={() => setRestoreOpen(true)}
-              testID="restore-purchases-button"
-              style={styles.restoreLinkBtn}
-            >
-              <Ionicons name="refresh" size={12} color="#0F172A" />
-              <Text style={styles.restoreLinkText}>Restore Purchases</Text>
-            </TouchableOpacity>
+            <View style={styles.rareDot} />
           </View>
           <View style={styles.grid}>
-            {SKIN_LIST.filter((s) => s.type === "premium").map((s) => (
+            {rareSkins.map((s) => (
               <SkinCard
                 key={s.id}
                 skin={s}
                 owned={progress.ownedSkins.includes(s.id)}
                 equipped={progress.equippedSkin === s.id}
                 onEquip={equip}
-                onBuy={buyPremium}
                 shimmerVal={shimmerVal}
-                purchasing={purchasing === s.id}
               />
             ))}
           </View>
@@ -332,63 +159,6 @@ export default function Skins() {
             </>
           )}
         </ScrollView>
-
-        <Modal
-          visible={restoreOpen}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setRestoreOpen(false)}
-        >
-          <View style={styles.modalBackdrop}>
-            <View style={styles.modalPanel}>
-              <Text style={styles.modalTitle}>Restore Purchases</Text>
-              <Text style={styles.modalBody}>
-                Enter the save code from the phone where you bought your
-                skins. We&apos;ll copy your premium skins to this device.
-                Your local progress stays as-is.
-              </Text>
-              <TextInput
-                value={restoreInput}
-                onChangeText={setRestoreInput}
-                placeholder="ABCD-1234"
-                placeholderTextColor="rgba(15,23,42,0.45)"
-                autoCapitalize="characters"
-                maxLength={9}
-                style={styles.modalInput}
-                testID="restore-purchases-input"
-              />
-              <View style={styles.modalBtnRow}>
-                <TouchableOpacity
-                  onPress={() => {
-                    if (!restoreRunning) {
-                      setRestoreOpen(false);
-                      setRestoreInput("");
-                    }
-                  }}
-                  style={styles.modalGhostBtn}
-                  testID="restore-purchases-cancel"
-                >
-                  <Text style={styles.modalGhostText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={submitRestore}
-                  disabled={restoreRunning || !restoreInput.trim()}
-                  style={[
-                    styles.modalPrimaryBtn,
-                    (restoreRunning || !restoreInput.trim()) && {
-                      opacity: 0.5,
-                    },
-                  ]}
-                  testID="restore-purchases-submit"
-                >
-                  <Text style={styles.modalPrimaryText}>
-                    {restoreRunning ? "Restoring…" : "Restore"}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
       </SafeAreaView>
     </LinearGradient>
   );
@@ -399,32 +169,24 @@ function SkinCard({
   owned,
   equipped,
   onEquip,
-  onBuy,
   shimmerVal,
-  purchasing,
 }: {
   skin: Skin;
   owned: boolean;
   equipped: boolean;
   onEquip: (id: Skin["id"]) => void;
-  onBuy: (s: Skin) => void;
   shimmerVal: number;
-  purchasing: boolean;
 }) {
   const locked = !owned;
-  const isPremium = skin.type === "premium";
+  const isRare = skin.tier === "rare";
 
   const handlePress = () => {
-    if (owned && !equipped) {
-      onEquip(skin.id);
-    } else if (!owned && isPremium) {
-      onBuy(skin);
-    }
+    if (owned && !equipped) onEquip(skin.id);
   };
 
   return (
     <TouchableOpacity
-      activeOpacity={isPremium || owned ? 0.85 : 1}
+      activeOpacity={owned ? 0.85 : 1}
       style={[
         styles.card,
         equipped && styles.cardEquipped,
@@ -433,10 +195,10 @@ function SkinCard({
       onPress={handlePress}
       testID={`skin-card-${skin.id}`}
     >
-      {isPremium && (
-        <View style={styles.premiumBadge}>
+      {isRare && (
+        <View style={styles.rareBadge}>
           <Ionicons name="diamond" size={10} color="#0F172A" />
-          <Text style={styles.premiumBadgeText}>PREMIUM</Text>
+          <Text style={styles.rareBadgeText}>RARE</Text>
         </View>
       )}
       <View style={styles.preview}>
@@ -453,18 +215,7 @@ function SkinCard({
       <Text style={styles.skinTagline} numberOfLines={2}>
         {skin.tagline}
       </Text>
-      {purchasing ? (
-        <View style={styles.equipChip}>
-          <ActivityIndicator size="small" color="#FFFFFF" />
-        </View>
-      ) : locked && isPremium ? (
-        <View
-          style={[styles.equipChip, { backgroundColor: "#FDE047" }]}
-          testID={`buy-chip-${skin.id}`}
-        >
-          <Text style={[styles.equipText, { color: "#0F172A" }]}>BUY $2.99</Text>
-        </View>
-      ) : locked ? (
+      {locked ? (
         <View style={styles.lockChip}>
           <Ionicons name="lock-closed" size={11} color="#0F172A" />
           <Text style={styles.lockText} numberOfLines={1}>
@@ -528,24 +279,6 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     color: "#0F172A",
   },
-  pollBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    backgroundColor: "#A5F3FC",
-    borderColor: "#0F172A",
-    borderWidth: 2,
-    borderRadius: 12,
-    marginHorizontal: 18,
-    marginBottom: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  pollText: {
-    color: "#0F172A",
-    fontWeight: "800",
-    fontSize: 13,
-  },
   content: { padding: 18, paddingBottom: 40 },
   sectionLabel: {
     fontSize: 11,
@@ -554,6 +287,19 @@ const styles = StyleSheet.create({
     color: "#0F172A",
     opacity: 0.7,
     marginBottom: 10,
+  },
+  rareHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 22,
+    marginBottom: 10,
+  },
+  rareDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#A78BFA",
   },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   card: {
@@ -634,7 +380,7 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     letterSpacing: 1,
   },
-  premiumBadge: {
+  rareBadge: {
     position: "absolute",
     top: 8,
     right: 8,
@@ -643,13 +389,13 @@ const styles = StyleSheet.create({
     gap: 3,
     paddingHorizontal: 6,
     paddingVertical: 3,
-    backgroundColor: "#FDE047",
+    backgroundColor: "#A78BFA",
     borderColor: "#0F172A",
     borderWidth: 1.5,
     borderRadius: 999,
     zIndex: 2,
   },
-  premiumBadgeText: {
+  rareBadgeText: {
     fontSize: 9,
     fontWeight: "900",
     color: "#0F172A",
@@ -672,103 +418,5 @@ const styles = StyleSheet.create({
     color: "#0F172A",
     opacity: 0.7,
     fontWeight: "600",
-  },
-  premiumHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 22,
-    marginBottom: 10,
-  },
-  restoreLinkBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: "rgba(255,255,255,0.78)",
-    borderColor: "#0F172A",
-    borderWidth: 2,
-    borderRadius: 999,
-  },
-  restoreLinkText: {
-    fontSize: 10,
-    fontWeight: "900",
-    letterSpacing: 1,
-    color: "#0F172A",
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(15,23,42,0.45)",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 24,
-  },
-  modalPanel: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#0F172A",
-    borderWidth: 2,
-    borderRadius: 22,
-    padding: 20,
-    width: "100%",
-  },
-  modalTitle: {
-    fontSize: 22,
-    fontWeight: "900",
-    color: "#0F172A",
-    letterSpacing: -0.5,
-    marginBottom: 8,
-  },
-  modalBody: {
-    fontSize: 13,
-    color: "#0F172A",
-    opacity: 0.75,
-    fontWeight: "600",
-    lineHeight: 19,
-    marginBottom: 12,
-  },
-  modalInput: {
-    borderWidth: 2,
-    borderColor: "#0F172A",
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 16,
-    fontWeight: "900",
-    letterSpacing: 2,
-    color: "#0F172A",
-    backgroundColor: "#FFFFFF",
-    marginBottom: 14,
-  },
-  modalBtnRow: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    gap: 10,
-  },
-  modalGhostBtn: {
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    borderRadius: 14,
-    borderWidth: 2,
-    borderColor: "rgba(15,23,42,0.2)",
-  },
-  modalGhostText: {
-    fontWeight: "800",
-    color: "#0F172A",
-    fontSize: 14,
-  },
-  modalPrimaryBtn: {
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    borderRadius: 14,
-    borderWidth: 2,
-    borderColor: "#0F172A",
-    backgroundColor: "#FDE047",
-  },
-  modalPrimaryText: {
-    fontWeight: "900",
-    color: "#0F172A",
-    fontSize: 14,
-    letterSpacing: 0.5,
   },
 });
