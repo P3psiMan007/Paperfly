@@ -137,6 +137,12 @@ export default function Game() {
     loadSensitivity().then((s) => (sensRef.current = s));
     loadCalibration().then((c) => (calibRef.current = c));
     loadProgress().then(setProgress);
+    // Hydrate sound preference + preload bundled SFX so playSfx() actually
+    // plays something. Without this, players are never created and every
+    // call is a silent no-op.
+    loadSfxEnabled().then(() => {
+      preloadSounds().catch(() => {});
+    });
     // Shimmer for skin animation
     const id = shimmerAnim.addListener(({ value }) => setShimmerVal(value));
     const loop = Animated.loop(
