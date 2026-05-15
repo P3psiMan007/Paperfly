@@ -541,14 +541,14 @@ export default function Game() {
           lastSpawnRef.current = 0;
           const rand = dailyRngRef.current ? dailyRngRef.current : Math.random;
           const r0 = rand();
-          // Slot allocation: 5 % powerup, 57 % ring, 38 % obstacle.
+          // Slot allocation: 3 % powerup, 57 % ring, 40 % obstacle.
           let type: WorldObj["type"];
           let powerup: PowerupKind | undefined;
-          if (r0 < 0.05) {
+          if (r0 < 0.03) {
             type = "powerup";
             const pr = rand();
             powerup = pr < 0.4 ? "shield" : pr < 0.75 ? "magnet" : "slowmo";
-          } else if (r0 < 0.62) {
+          } else if (r0 < 0.60) {
             type = "ring";
           } else {
             type = "obstacle";
