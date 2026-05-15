@@ -55,12 +55,14 @@ export function ParallaxClouds({
   tiltY,
   SW,
   SH,
+  cloudColor = "#FFFFFF",
 }: {
   offset: number;
   tiltX: number;
   tiltY: number;
   SW: number;
   SH: number;
+  cloudColor?: string;
 }) {
   const layers = [
     { speed: 0.4, y: SH * 0.15, size: 110, count: 4, opacity: 0.55 },
@@ -89,6 +91,7 @@ export function ParallaxClouds({
                     ((x % (SW + 200)) + (SW + 200)) % (SW + 200) - 100,
                   top: y,
                   opacity: layer.opacity,
+                  backgroundColor: cloudColor,
                 },
               ]}
             />

@@ -39,6 +39,11 @@ import {
   ParallaxClouds,
   PowerupHud,
 } from "../src/game/Hud";
+import {
+  ENVIRONMENTS,
+  environmentForScore,
+  Environment,
+} from "../src/game/environment";
 import { Coin } from "../src/game/Coin";
 import {
   loadCalibration,
@@ -141,6 +146,10 @@ export default function Game() {
   const [shieldActive, setShieldActive] = useState(false);
   const [magnetUntilHud, setMagnetUntilHud] = useState(0);
   const [slowmoUntilHud, setSlowmoUntilHud] = useState(0);
+  // Current sky environment. Updated only when the score crosses a threshold
+  // so we don't churn React state every frame.
+  const [env, setEnv] = useState<Environment>(ENVIRONMENTS[0]);
+  const envIdRef = useRef<Environment["id"]>(ENVIRONMENTS[0].id);
   const calibTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Calibration averaging: sample raw tilt continuously during the hold window
   // and use the mean, so a single twitch can't lock in a bad neutral pose.
@@ -375,6 +384,8 @@ export default function Game() {
     setShieldActive(false);
     setMagnetUntilHud(0);
     setSlowmoUntilHud(0);
+    envIdRef.current = ENVIRONMENTS[0].id;
+    setEnv(ENVIRONMENTS[0]);
     setRunResult(null);
     // Reset daily RNG so the same daily is reproducible per attempt
     dailyRngRef.current = isDaily ? mulberry32(todaySeed()) : null;
@@ -498,6 +509,20 @@ export default function Game() {
           comboRef.current = 0;
           comboExpiresRef.current = 0;
           setCombo(0);
+        }
+
+        // Environment shift: only push to React state when the bucket changes,
+        // so the LinearGradient remounts at most a handful of times per run.
+        const nextEnv = environmentForScore(scoreRef.current);
+        if (nextEnv.id !== envIdRef.current) {
+          envIdRef.current = nextEnv.id;
+          setEnv(nextEnv);
+          popupsRef.current.push({
+            id: nextId++,
+            value: 0,
+            t: now,
+            label: nextEnv.name.toUpperCase(),
+          });
         }
 
         cloudOffsetRef.current =
@@ -854,7 +879,7 @@ export default function Game() {
   return (
     <View style={styles.root}>
       <LinearGradient
-        colors={["#FFDEE9", "#FFE3B5", "#B5FFFC"]}
+        colors={env.gradient}
         style={StyleSheet.absoluteFill}
       />
 
@@ -875,6 +900,7 @@ export default function Game() {
         tiltY={tiltY}
         SW={SW}
         SH={SH}
+        cloudColor={env.cloud}
       />
 
       <View style={[StyleSheet.absoluteFill, { pointerEvents: "none" }]}>
