@@ -20,6 +20,25 @@ import * as Haptics from "expo-haptics";
 import PaperPlane from "../src/PaperPlane";
 import Cloud from "../src/Cloud";
 import {
+  FOCAL,
+  FAR_Z,
+  SPAWN_Z,
+  PLANE_SIZE,
+  BASE_SPEED,
+  BOOST_SPEED,
+  BRAKE_SPEED,
+  PLANE_X_RANGE,
+  PLANE_Y_RANGE,
+  WorldObj,
+  GameState,
+} from "../src/game/projection";
+import {
+  Overlay,
+  TiltIndicator,
+  BoostLines,
+  ParallaxClouds,
+} from "../src/game/Hud";
+import {
   loadCalibration,
   saveCalibration,
   loadSensitivity,
@@ -45,30 +64,6 @@ const SKINS_BY_LEVEL: { id: SkinId; level: number }[] = [
   { id: "skyblue", level: 3 },
   { id: "crimson", level: 8 },
 ];
-
-// World/projection constants
-const FOCAL = 320;
-const FAR_Z = 1100;
-const SPAWN_Z = 1000;
-const PLANE_SIZE = 76;
-const BASE_SPEED = 380;
-const BOOST_SPEED = 680;
-const BRAKE_SPEED = 180;
-const PLANE_X_RANGE = 220;
-const PLANE_Y_RANGE = 170;
-
-type WorldObj = {
-  id: number;
-  type: "ring" | "obstacle";
-  x: number;
-  y: number;
-  z: number;
-  baseSize: number;
-  collected?: boolean;
-  hue?: string;
-};
-
-type GameState = "ready" | "playing" | "paused" | "gameover";
 
 let nextId = 1;
 
@@ -1091,106 +1086,6 @@ export default function Game() {
   );
 }
 
-function Overlay({
-  children,
-  SW,
-}: {
-  children: React.ReactNode;
-  SW: number;
-}) {
-  return (
-    <View style={[styles.overlayWrap, { pointerEvents: "box-none" }]}>
-      <View style={[styles.overlayPanel, { width: SW - 60 }]}>{children}</View>
-    </View>
-  );
-}
-
-function TiltIndicator({ tiltX, tiltY }: { tiltX: number; tiltY: number }) {
-  const dotX = 22 + tiltX * 18;
-  const dotY = 22 + tiltY * 18;
-  return (
-    <View style={styles.tiltIndicator} testID="tilt-indicator">
-      <View style={styles.tiltCross} />
-      <View style={styles.tiltCrossV} />
-      <View style={[styles.tiltDot, { left: dotX - 6, top: dotY - 6 }]} />
-    </View>
-  );
-}
-
-function BoostLines({ SW, SH }: { SW: number; SH: number }) {
-  const lines = Array.from({ length: 10 });
-  return (
-    <View style={[StyleSheet.absoluteFill, { pointerEvents: "none" }]}>
-      {lines.map((_, i) => {
-        const side = i % 2 === 0 ? -1 : 1;
-        const top = 60 + ((i * 73) % (SH - 200));
-        return (
-          <View
-            key={i}
-            style={[
-              styles.boostLine,
-              {
-                top,
-                left: side === -1 ? 10 : SW - 90,
-                opacity: 0.55,
-              },
-            ]}
-          />
-        );
-      })}
-    </View>
-  );
-}
-
-function ParallaxClouds({
-  offset,
-  tiltX,
-  tiltY,
-  SW,
-  SH,
-}: {
-  offset: number;
-  tiltX: number;
-  tiltY: number;
-  SW: number;
-  SH: number;
-}) {
-  const layers = [
-    { speed: 0.4, y: SH * 0.15, size: 110, count: 4, opacity: 0.55 },
-    { speed: 0.7, y: SH * 0.32, size: 80, count: 5, opacity: 0.7 },
-    { speed: 1.0, y: SH * 0.78, size: 130, count: 3, opacity: 0.8 },
-  ];
-  return (
-    <View style={[StyleSheet.absoluteFill, { pointerEvents: "none" }]}>
-      {layers.map((layer, li) =>
-        Array.from({ length: layer.count }).map((_, i) => {
-          const spacing = SW / layer.count + 80;
-          const baseX =
-            i * spacing - ((offset * layer.speed) % (SW + 200)) - 100;
-          const x = baseX - tiltX * 30 * layer.speed;
-          const y = layer.y - tiltY * 20 * layer.speed;
-          return (
-            <View
-              key={`${li}-${i}`}
-              style={[
-                styles.cloud,
-                {
-                  width: layer.size,
-                  height: layer.size * 0.45,
-                  borderRadius: layer.size,
-                  left:
-                    ((x % (SW + 200)) + (SW + 200)) % (SW + 200) - 100,
-                  top: y,
-                  opacity: layer.opacity,
-                },
-              ]}
-            />
-          );
-        })
-      )}
-    </View>
-  );
-}
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#FFDEE9", overflow: "hidden" },
@@ -1201,7 +1096,6 @@ const styles = StyleSheet.create({
     height: 4,
     backgroundColor: "rgba(15,23,42,0.18)",
   },
-  cloud: { position: "absolute", backgroundColor: "#FFFFFF" },
   scorePopup: {
     position: "absolute",
     width: 60,
@@ -1340,38 +1234,6 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   speedBarFill: { height: "100%" },
-  tiltIndicator: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "rgba(255,255,255,0.7)",
-    borderWidth: 2,
-    borderColor: "#0F172A",
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-  },
-  tiltCross: {
-    position: "absolute",
-    width: "70%",
-    height: 1,
-    backgroundColor: "rgba(15,23,42,0.4)",
-  },
-  tiltCrossV: {
-    position: "absolute",
-    height: "70%",
-    width: 1,
-    backgroundColor: "rgba(15,23,42,0.4)",
-  },
-  tiltDot: {
-    position: "absolute",
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: "#FDE047",
-    borderWidth: 1.5,
-    borderColor: "#0F172A",
-  },
   cornerBtns: {
     position: "absolute",
     right: 16,
@@ -1403,28 +1265,6 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   boostText: { fontWeight: "900", color: "#0F172A", letterSpacing: 1 },
-  boostLine: {
-    position: "absolute",
-    width: 80,
-    height: 3,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 2,
-  },
-  overlayWrap: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(15,23,42,0.25)",
-  },
-  overlayPanel: {
-    backgroundColor: "rgba(255,255,255,0.95)",
-    borderColor: "#0F172A",
-    borderWidth: 2,
-    borderRadius: 24,
-    paddingHorizontal: 24,
-    paddingVertical: 28,
-    alignItems: "center",
-  },
   overlayEyebrow: {
     fontSize: 11,
     letterSpacing: 4,
