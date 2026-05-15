@@ -22,19 +22,42 @@ async function jsonFetch<T>(input: string, init?: RequestInit): Promise<T> {
 }
 
 export async function createSaveCode(progress: Progress): Promise<string> {
+  const deviceId = await getDeviceId();
   const data = await jsonFetch<{ code: string }>(API("/save"), {
     method: "POST",
-    body: JSON.stringify({ progress }),
+    body: JSON.stringify({ progress, device_id: deviceId }),
   });
   return data.code;
 }
 
-export async function fetchSaveByCode(code: string): Promise<Progress> {
+export type RestoredSave = {
+  progress: Progress;
+  ownedSkins: string[];
+};
+
+export async function fetchSaveByCode(code: string): Promise<RestoredSave> {
   const cleaned = code.toUpperCase().trim().replace(/\s+/g, "");
-  const data = await jsonFetch<{ progress: Progress }>(
-    API(`/save/${encodeURIComponent(cleaned)}`)
-  );
-  return data.progress;
+  const data = await jsonFetch<{
+    progress: Progress;
+    owned_skins?: string[];
+  }>(API(`/save/${encodeURIComponent(cleaned)}`));
+  return {
+    progress: data.progress,
+    ownedSkins: data.owned_skins || [],
+  };
+}
+
+// Copy premium-skin ownership from the original device that created a save
+// code onto the current device. Used by the "Restore Purchases" button on
+// Skins so paid skins survive an app reinstall / phone switch.
+export async function transferPurchasesByCode(code: string): Promise<string[]> {
+  const cleaned = code.toUpperCase().trim().replace(/\s+/g, "");
+  const deviceId = await getDeviceId();
+  const data = await jsonFetch<{ owned: string[] }>(API("/transfer-device"), {
+    method: "POST",
+    body: JSON.stringify({ code: cleaned, new_device_id: deviceId }),
+  });
+  return data.owned || [];
 }
 
 export async function createCheckoutSession(

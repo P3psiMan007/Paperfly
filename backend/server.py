@@ -70,6 +70,9 @@ class CheckoutStatusResponseModel(BaseModel):
 
 class SaveCreateBody(BaseModel):
     progress: Dict
+    # Optional source device id, so restoring this code can also pull in
+    # premium-skin ownership tied to the original purchasing device.
+    device_id: Optional[str] = None
 
 
 class SaveCreatedResponse(BaseModel):
@@ -78,9 +81,20 @@ class SaveCreatedResponse(BaseModel):
 
 class SaveFetchResponse(BaseModel):
     progress: Dict
+    # Premium skins owned by the device that created this code, if known.
+    owned_skins: list[str] = Field(default_factory=list)
 
 
 class OwnedSkinsResponse(BaseModel):
+    owned: list[str]
+
+
+class TransferDeviceBody(BaseModel):
+    code: str
+    new_device_id: str
+
+
+class TransferDeviceResponse(BaseModel):
     owned: list[str]
 
 
@@ -294,6 +308,7 @@ async def create_save(body: SaveCreateBody):
         {
             "code": code,
             "progress": body.progress,
+            "device_id": body.device_id,
             "created_at": datetime.now(timezone.utc),
         }
     )
@@ -306,7 +321,42 @@ async def fetch_save(code: str):
     doc = await db.saves.find_one({"code": code}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Save code not found")
-    return SaveFetchResponse(progress=doc["progress"])
+    owned_skins: list[str] = []
+    src_device_id = doc.get("device_id")
+    if src_device_id:
+        owned_doc = await db.device_skins.find_one(
+            {"device_id": src_device_id}, {"_id": 0}
+        )
+        owned_skins = list((owned_doc or {}).get("owned", []))
+    return SaveFetchResponse(progress=doc["progress"], owned_skins=owned_skins)
+
+
+@api.post("/transfer-device", response_model=TransferDeviceResponse)
+async def transfer_device(body: TransferDeviceBody):
+    """Copy premium-skin ownership from the save code's original device onto
+    a new device id. Used by the 'Restore Purchases' button on the new
+    device so paid skins survive an app reinstall / phone switch.
+    Idempotent: re-running with the same code + device just re-unions skins.
+    """
+    code = body.code.upper().strip()
+    doc = await db.saves.find_one({"code": code}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Save code not found")
+    src_device_id = doc.get("device_id")
+    if not src_device_id:
+        # Legacy save with no device link — nothing to transfer.
+        return TransferDeviceResponse(owned=[])
+    owned_doc = await db.device_skins.find_one(
+        {"device_id": src_device_id}, {"_id": 0}
+    )
+    owned: list[str] = list((owned_doc or {}).get("owned", []))
+    if owned:
+        await db.device_skins.update_one(
+            {"device_id": body.new_device_id},
+            {"$addToSet": {"owned": {"$each": owned}}},
+            upsert=True,
+        )
+    return TransferDeviceResponse(owned=owned)
 
 
 # Mount router

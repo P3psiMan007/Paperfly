@@ -93,7 +93,19 @@ export default function Settings() {
     try {
       const restored = await fetchSaveByCode(cleaned);
       const localNow = await loadProgress();
-      const merged = mergeProgress(localNow, restored as Partial<Progress>);
+      // The cloud save also tells us which premium skins the original
+      // purchasing device owns; fold them into the merged progress so a
+      // restore on a new device brings paid skins along.
+      const restoredWithSkins: Partial<Progress> = {
+        ...restored.progress,
+        ownedSkins: Array.from(
+          new Set([
+            ...(restored.progress?.ownedSkins || []),
+            ...restored.ownedSkins,
+          ])
+        ) as Progress["ownedSkins"],
+      };
+      const merged = mergeProgress(localNow, restoredWithSkins);
       await saveProgress(merged);
       setProgress(merged);
       Alert.alert(

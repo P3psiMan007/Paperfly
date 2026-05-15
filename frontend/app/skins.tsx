@@ -9,6 +9,8 @@ import {
   Easing,
   Alert,
   ActivityIndicator,
+  Modal,
+  TextInput,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -32,6 +34,7 @@ import {
   createCheckoutSession,
   getCheckoutStatus,
   getOwnedSkins,
+  transferPurchasesByCode,
 } from "../src/api";
 
 export default function Skins() {
@@ -45,6 +48,11 @@ export default function Skins() {
   const pollAttemptsRef = useRef(0);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollCancelledRef = useRef(false);
+
+  // Restore-purchases modal state.
+  const [restoreOpen, setRestoreOpen] = useState(false);
+  const [restoreInput, setRestoreInput] = useState("");
+  const [restoreRunning, setRestoreRunning] = useState(false);
 
   // Stop any in-flight Stripe poll when this screen unmounts so we don't
   // call setState / show Alerts on a screen that's already gone.
@@ -163,6 +171,38 @@ export default function Skins() {
     await saveProgress(next);
   };
 
+  const submitRestore = async () => {
+    const cleaned = restoreInput.toUpperCase().trim();
+    if (!cleaned) return;
+    setRestoreRunning(true);
+    try {
+      const owned = await transferPurchasesByCode(cleaned);
+      if (owned.length === 0) {
+        Alert.alert(
+          "Nothing to restore",
+          "We couldn't find any premium skins linked to that save code."
+        );
+      } else {
+        await refresh();
+        Alert.alert(
+          "Restored",
+          `Brought back ${owned.length} premium skin${owned.length === 1 ? "" : "s"}.`
+        );
+      }
+      setRestoreOpen(false);
+      setRestoreInput("");
+    } catch (e: any) {
+      Alert.alert(
+        "Restore failed",
+        e?.message?.startsWith("404")
+          ? "Save code not found. Double-check the code."
+          : e?.message || "Please try again."
+      );
+    } finally {
+      setRestoreRunning(false);
+    }
+  };
+
   const buyPremium = async (skin: Skin) => {
     setPurchasing(skin.id);
     try {
@@ -241,9 +281,19 @@ export default function Skins() {
             ))}
           </View>
 
-          <Text style={[styles.sectionLabel, { marginTop: 22 }]}>
-            PREMIUM · $2.99 EACH
-          </Text>
+          <View style={styles.premiumHeader}>
+            <Text style={[styles.sectionLabel, { marginTop: 0 }]}>
+              PREMIUM · $2.99 EACH
+            </Text>
+            <TouchableOpacity
+              onPress={() => setRestoreOpen(true)}
+              testID="restore-purchases-button"
+              style={styles.restoreLinkBtn}
+            >
+              <Ionicons name="refresh" size={12} color="#0F172A" />
+              <Text style={styles.restoreLinkText}>Restore Purchases</Text>
+            </TouchableOpacity>
+          </View>
           <View style={styles.grid}>
             {SKIN_LIST.filter((s) => s.type === "premium").map((s) => (
               <SkinCard
@@ -282,6 +332,63 @@ export default function Skins() {
             </>
           )}
         </ScrollView>
+
+        <Modal
+          visible={restoreOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setRestoreOpen(false)}
+        >
+          <View style={styles.modalBackdrop}>
+            <View style={styles.modalPanel}>
+              <Text style={styles.modalTitle}>Restore Purchases</Text>
+              <Text style={styles.modalBody}>
+                Enter the save code from the phone where you bought your
+                skins. We&apos;ll copy your premium skins to this device.
+                Your local progress stays as-is.
+              </Text>
+              <TextInput
+                value={restoreInput}
+                onChangeText={setRestoreInput}
+                placeholder="ABCD-1234"
+                placeholderTextColor="rgba(15,23,42,0.45)"
+                autoCapitalize="characters"
+                maxLength={9}
+                style={styles.modalInput}
+                testID="restore-purchases-input"
+              />
+              <View style={styles.modalBtnRow}>
+                <TouchableOpacity
+                  onPress={() => {
+                    if (!restoreRunning) {
+                      setRestoreOpen(false);
+                      setRestoreInput("");
+                    }
+                  }}
+                  style={styles.modalGhostBtn}
+                  testID="restore-purchases-cancel"
+                >
+                  <Text style={styles.modalGhostText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={submitRestore}
+                  disabled={restoreRunning || !restoreInput.trim()}
+                  style={[
+                    styles.modalPrimaryBtn,
+                    (restoreRunning || !restoreInput.trim()) && {
+                      opacity: 0.5,
+                    },
+                  ]}
+                  testID="restore-purchases-submit"
+                >
+                  <Text style={styles.modalPrimaryText}>
+                    {restoreRunning ? "Restoring…" : "Restore"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </SafeAreaView>
     </LinearGradient>
   );
@@ -565,5 +672,103 @@ const styles = StyleSheet.create({
     color: "#0F172A",
     opacity: 0.7,
     fontWeight: "600",
+  },
+  premiumHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 22,
+    marginBottom: 10,
+  },
+  restoreLinkBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: "rgba(255,255,255,0.78)",
+    borderColor: "#0F172A",
+    borderWidth: 2,
+    borderRadius: 999,
+  },
+  restoreLinkText: {
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 1,
+    color: "#0F172A",
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(15,23,42,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  modalPanel: {
+    backgroundColor: "#FFFFFF",
+    borderColor: "#0F172A",
+    borderWidth: 2,
+    borderRadius: 22,
+    padding: 20,
+    width: "100%",
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: "900",
+    color: "#0F172A",
+    letterSpacing: -0.5,
+    marginBottom: 8,
+  },
+  modalBody: {
+    fontSize: 13,
+    color: "#0F172A",
+    opacity: 0.75,
+    fontWeight: "600",
+    lineHeight: 19,
+    marginBottom: 12,
+  },
+  modalInput: {
+    borderWidth: 2,
+    borderColor: "#0F172A",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+    fontWeight: "900",
+    letterSpacing: 2,
+    color: "#0F172A",
+    backgroundColor: "#FFFFFF",
+    marginBottom: 14,
+  },
+  modalBtnRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 10,
+  },
+  modalGhostBtn: {
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: "rgba(15,23,42,0.2)",
+  },
+  modalGhostText: {
+    fontWeight: "800",
+    color: "#0F172A",
+    fontSize: 14,
+  },
+  modalPrimaryBtn: {
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: "#0F172A",
+    backgroundColor: "#FDE047",
+  },
+  modalPrimaryText: {
+    fontWeight: "900",
+    color: "#0F172A",
+    fontSize: 14,
+    letterSpacing: 0.5,
   },
 });
