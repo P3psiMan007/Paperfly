@@ -137,6 +137,15 @@ export default function Game() {
   // refreshes this; if you don't grab one inside this window the streak resets
   // even without crashing (so combos take effort to sustain).
   const comboExpiresRef = useRef(0);
+  // Last announced multiplier tier (1..5). Compared against the freshly
+  // computed mult on each ring grab so the tier-up popup + haptic fires
+  // only on the coin that crosses the threshold, not on every coin at
+  // that tier. Reset to 1 on world reset, crash, and combo lapse.
+  const comboTierRef = useRef(1);
+  // performance.now() ms until which the score HUD pill scales up to
+  // celebrate a tier-up. Read at render time; the game loop's setTick
+  // already drives a re-render every frame during play.
+  const scoreFlashUntilRef = useRef(0);
   const [combo, setCombo] = useState(0);
   // Powerups. Shield is binary (one-shot), magnet/slowmo are timestamps for
   // when the effect expires. Mirrored to React state for the HUD.
@@ -377,6 +386,8 @@ export default function Game() {
     comboRef.current = 0;
     bestComboRef.current = 0;
     comboExpiresRef.current = 0;
+    comboTierRef.current = 1;
+    scoreFlashUntilRef.current = 0;
     setCombo(0);
     shieldRef.current = false;
     magnetUntilRef.current = 0;
@@ -508,6 +519,7 @@ export default function Game() {
         ) {
           comboRef.current = 0;
           comboExpiresRef.current = 0;
+          comboTierRef.current = 1;
           setCombo(0);
         }
 
@@ -709,6 +721,24 @@ export default function Game() {
                 const mult = Math.min(5, 1 + Math.floor(comboRef.current / 3));
                 const gained = 50 * mult;
                 scoreRef.current += gained;
+                // Tier-up moment: only the coin that crosses a new multiplier
+                // threshold (×2 at combo 3, ×3 at 6, ×4 at 9, ×5 at 12) fires
+                // an extra popup, success haptic, and a 350 ms HUD scale flash.
+                if (mult > comboTierRef.current) {
+                  comboTierRef.current = mult;
+                  scoreFlashUntilRef.current = now + 350;
+                  popupsRef.current.push({
+                    id: nextId++,
+                    value: 0,
+                    t: now,
+                    label: `COMBO ×${mult}!`,
+                  });
+                  if (Platform.OS !== "web") {
+                    Haptics.notificationAsync(
+                      Haptics.NotificationFeedbackType.Success
+                    ).catch(() => {});
+                  }
+                }
                 popupsRef.current.push({
                   id: nextId++,
                   value: gained,
@@ -762,6 +792,7 @@ export default function Game() {
                 } else {
                   comboRef.current = 0;
                   comboExpiresRef.current = 0;
+                  comboTierRef.current = 1;
                   setCombo(0);
                   setCrashFlash(true);
                   setTimeout(() => setCrashFlash(false), 280);
@@ -844,6 +875,14 @@ export default function Game() {
   // 0..1 sine used by the splitter render below to throb its warning
   // border. ~1.3 Hz cycle reads as "telegraphing" without being seizure-y.
   const splitterPulse = 0.5 + 0.5 * Math.sin(performance.now() * 0.008);
+  // Score HUD scale flash on combo tier-up. Eases from 1.15 back to 1.00
+  // across the 350 ms window so the pop doesn't snap, and naturally
+  // returns to 1 once the timer expires (Math.max clamps the lerp).
+  const scoreFlashRemain = Math.max(
+    0,
+    scoreFlashUntilRef.current - performance.now()
+  );
+  const scoreScale = 1 + 0.15 * (scoreFlashRemain / 350);
   const planeWorldX =
     smoothTiltRef.current.roll * sensRef.current * PLANE_X_RANGE;
   const planeWorldY =
@@ -1116,7 +1155,13 @@ export default function Game() {
         <View
           style={[styles.hudTop, { pointerEvents: "box-none" }]}
         >
-          <View style={styles.hudPill} testID="score-display">
+          <View
+            style={[
+              styles.hudPill,
+              { transform: [{ scale: scoreScale }] },
+            ]}
+            testID="score-display"
+          >
             <Ionicons name="trophy" size={14} color="#0F172A" />
             <Text style={styles.hudText}>{score}</Text>
           </View>
