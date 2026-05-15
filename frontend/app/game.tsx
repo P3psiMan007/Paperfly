@@ -95,6 +95,11 @@ export default function Game() {
   const rawTiltRef = useRef({ pitch: 0, roll: 0 });
   const smoothTiltRef = useRef({ pitch: 0, roll: 0 });
   const objectsRef = useRef<WorldObj[]>([]);
+  // Keep window dimensions visible to the [] -deps game loop without restarting it.
+  const dimsRef = useRef({ SW, SH });
+  useEffect(() => {
+    dimsRef.current = { SW, SH };
+  }, [SW, SH]);
   const lastFrameRef = useRef(performance.now());
   const lastSpawnRef = useRef(0);
   const speedRef = useRef(BASE_SPEED);
@@ -399,6 +404,17 @@ export default function Game() {
         const planeWorldY =
           -smoothTiltRef.current.pitch * sensRef.current * PLANE_Y_RANGE;
 
+        // Project the plane to screen the SAME way it's drawn in the render
+        // pass below — so "what you see" matches "what collides."
+        const SWnow = dimsRef.current.SW;
+        const SHnow = dimsRef.current.SH;
+        const cxNow = SWnow / 2;
+        const planeAnchorYNow = SHnow * 0.62;
+        const planeScreenXNow =
+          cxNow + smoothTiltRef.current.roll * sensRef.current * 90;
+        const planeScreenYNow =
+          planeAnchorYNow + smoothTiltRef.current.pitch * sensRef.current * 70;
+
         const objs = objectsRef.current;
         for (let i = objs.length - 1; i >= 0; i--) {
           const o = objs[i];
@@ -407,15 +423,27 @@ export default function Game() {
             objs.splice(i, 1);
             continue;
           }
-          if (!o.collected && o.z < 50) {
-            const dx = o.x - planeWorldX;
-            const dy = o.y - planeWorldY;
+          // Collision window slightly wider than before (was z<50). Objects move
+          // fast at close range, so we start checking a bit earlier.
+          if (!o.collected && o.z < 80) {
+            // Project object to screen using the EXACT same formula as the renderer.
+            const scale = FOCAL / o.z;
+            const sx = cxNow + (o.x - planeWorldX * 0.4) * scale;
+            const sy =
+              planeAnchorYNow +
+              (o.y - planeWorldY * 0.4) * scale -
+              (1 - scale) * 80;
+            const projectedSize = o.baseSize * scale;
+
+            const dx = sx - planeScreenXNow;
+            const dy = sy - planeScreenYNow;
             const distSq = dx * dx + dy * dy;
-            // Tighter hitboxes: obstacles forgiving, rings still easy to collect
+            // Screen-space hit radii: tuned so visible overlap = collision.
+            // Rings remain generous; obstacles must visually touch the sprite.
             const hitR =
               o.type === "ring"
-                ? o.baseSize * 0.55 + PLANE_SIZE * 0.22
-                : o.baseSize * 0.38 + PLANE_SIZE * 0.18;
+                ? projectedSize * 0.45 + PLANE_SIZE * 0.35
+                : projectedSize * 0.32 + PLANE_SIZE * 0.22;
             if (distSq < hitR * hitR) {
               if (o.type === "ring") {
                 o.collected = true;
