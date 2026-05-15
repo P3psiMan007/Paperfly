@@ -33,6 +33,7 @@ export const DEFAULT_PROGRESS: Progress = {
 // Level 1 starts at 0 xp. To reach level N you need LEVELS[N-1] xp.
 export const LEVELS = [
   0, 80, 200, 380, 620, 920, 1280, 1700, 2200, 2800, 3500, 4400, 5500, 7000,
+  8800, 11000, 13500, 16500, 20000, 24000,
 ];
 
 export function levelFromXp(xp: number): number {
@@ -138,6 +139,9 @@ export type RunStats = {
   seconds: number;
   boosts: number;
   crashed: boolean;
+  // Highest consecutive-coin streak this run (without missing / crashing).
+  // Optional for backward-compat with any caller that hasn't been updated.
+  bestCombo?: number;
 };
 
 export type RunResult = {
@@ -183,6 +187,9 @@ export function applyRun(
   newAch("first_crash", stats.crashed);
   newAch("score_1500", stats.score >= 1500);
   newAch("survive_90", stats.seconds >= 90);
+  newAch("rings_100", next.totalRings >= 100);
+  newAch("combo_15", (stats.bestCombo || 0) >= 15);
+  newAch("score_3000", stats.score >= 3000);
 
   // Skin unlocks via achievement
   const unlockedSkinsByAchievement: SkinId[] = [];

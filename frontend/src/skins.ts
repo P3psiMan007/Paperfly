@@ -6,10 +6,15 @@
 export type SkinId =
   | "origami"
   | "skyblue"
+  | "sunset"
   | "mint"
   | "crimson"
+  | "storm"
+  | "ocean"
   | "aurora"
+  | "neon"
   | "phoenix"
+  | "stealth"
   | "galaxy";
 
 export type SkinFlair = "plain" | "shimmer" | "flame" | "galaxy";
@@ -31,7 +36,10 @@ export type AchievementId =
   | "score_500"
   | "first_crash"
   | "score_1500"
-  | "survive_90";
+  | "survive_90"
+  | "rings_100"
+  | "combo_15"
+  | "score_3000";
 
 export type SkinUnlock =
   | { kind: "default" }
@@ -82,6 +90,18 @@ export const ACHIEVEMENTS: Record<
     name: "Marathon Flyer",
     description: "Survive 90 seconds in a single run",
   },
+  rings_100: {
+    name: "Coin Hoarder",
+    description: "Collect 100 coins (lifetime)",
+  },
+  combo_15: {
+    name: "On Fire",
+    description: "Chain a 15-coin combo without missing",
+  },
+  score_3000: {
+    name: "Legend",
+    description: "Reach 3,000 score in a single run",
+  },
 };
 
 export const SKINS: Record<SkinId, Skin> = {
@@ -113,6 +133,21 @@ export const SKINS: Record<SkinId, Skin> = {
       tailFin: "#1E40AF",
     },
   },
+  sunset: {
+    id: "sunset",
+    name: "Sunset",
+    tagline: "Reach Level 5 · golden hour glow",
+    tier: "free",
+    unlock: { kind: "level", level: 5 },
+    flair: "plain",
+    palette: {
+      wingLight: "#FED7AA",
+      wingDark: "#FB923C",
+      outline: "#7C2D12",
+      tailFin: "#C2410C",
+      glow: "#FDBA74",
+    },
+  },
   mint: {
     id: "mint",
     name: "Mint Glider",
@@ -141,6 +176,36 @@ export const SKINS: Record<SkinId, Skin> = {
       tailFin: "#991B1B",
     },
   },
+  storm: {
+    id: "storm",
+    name: "Storm",
+    tagline: "Collect 100 coins lifetime · thunder gray",
+    tier: "free",
+    unlock: { kind: "achievement", id: "rings_100" },
+    flair: "plain",
+    palette: {
+      wingLight: "#CBD5E1",
+      wingDark: "#475569",
+      outline: "#0F172A",
+      tailFin: "#1E293B",
+      glow: "#94A3B8",
+    },
+  },
+  ocean: {
+    id: "ocean",
+    name: "Ocean",
+    tagline: "Reach Level 10 · deep sea drift",
+    tier: "free",
+    unlock: { kind: "level", level: 10 },
+    flair: "plain",
+    palette: {
+      wingLight: "#CFFAFE",
+      wingDark: "#0891B2",
+      outline: "#0F172A",
+      tailFin: "#155E75",
+      glow: "#22D3EE",
+    },
+  },
   aurora: {
     id: "aurora",
     name: "Aurora",
@@ -157,6 +222,22 @@ export const SKINS: Record<SkinId, Skin> = {
       gradient: ["#FBCFE8", "#A5F3FC", "#C4B5FD", "#FEF3C7"],
     },
   },
+  neon: {
+    id: "neon",
+    name: "Neon",
+    tagline: "Chain a 15-coin combo · electric cyber glow",
+    tier: "rare",
+    unlock: { kind: "achievement", id: "combo_15" },
+    flair: "shimmer",
+    palette: {
+      wingLight: "#F0ABFC",
+      wingDark: "#22D3EE",
+      outline: "#0F172A",
+      tailFin: "#A21CAF",
+      glow: "#22D3EE",
+      gradient: ["#F0ABFC", "#22D3EE", "#FACC15", "#A21CAF"],
+    },
+  },
   phoenix: {
     id: "phoenix",
     name: "Phoenix",
@@ -171,6 +252,21 @@ export const SKINS: Record<SkinId, Skin> = {
       tailFin: "#B91C1C",
       glow: "#FB923C",
       gradient: ["#FCD34D", "#F97316", "#DC2626"],
+    },
+  },
+  stealth: {
+    id: "stealth",
+    name: "Stealth",
+    tagline: "Score 3,000 in one run · matte midnight",
+    tier: "rare",
+    unlock: { kind: "achievement", id: "score_3000" },
+    flair: "plain",
+    palette: {
+      wingLight: "#1F2937",
+      wingDark: "#0F172A",
+      outline: "#FDE047",
+      tailFin: "#FDE047",
+      glow: "#FDE047",
     },
   },
   galaxy: {

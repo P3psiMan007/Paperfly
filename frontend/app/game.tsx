@@ -60,12 +60,17 @@ import { playSfx, preloadSounds, loadSfxEnabled } from "../src/audio";
 // the run-resolver uses.
 const SKIN_BY_ACHIEVEMENT: Partial<Record<SkinId, AchievementId>> = {
   mint: "rings_25",
+  storm: "rings_100",
   phoenix: "score_1500",
   galaxy: "survive_90",
+  neon: "combo_15",
+  stealth: "score_3000",
 };
 const SKINS_BY_LEVEL: { id: SkinId; level: number }[] = [
   { id: "skyblue", level: 3 },
+  { id: "sunset", level: 5 },
   { id: "crimson", level: 8 },
+  { id: "ocean", level: 10 },
   { id: "aurora", level: 12 },
 ];
 
@@ -115,6 +120,15 @@ export default function Game() {
   const runStartRef = useRef(0);
   const boostsThisRunRef = useRef(0);
   const wasBoostingRef = useRef(false);
+  // Combo: consecutive coins without crashing. Crash resets it. Score from a
+  // coin = 50 * comboMultiplier (caps at 5x).
+  const comboRef = useRef(0);
+  const bestComboRef = useRef(0);
+  // Wall-clock ms when the combo will lapse if no coin is grabbed. A coin
+  // refreshes this; if you don't grab one inside this window the streak resets
+  // even without crashing (so combos take effort to sustain).
+  const comboExpiresRef = useRef(0);
+  const [combo, setCombo] = useState(0);
   const calibTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Calibration averaging: sample raw tilt continuously during the hold window
   // and use the mean, so a single twitch can't lock in a bad neutral pose.
@@ -337,6 +351,10 @@ export default function Game() {
     runStartRef.current = performance.now();
     boostsThisRunRef.current = 0;
     wasBoostingRef.current = false;
+    comboRef.current = 0;
+    bestComboRef.current = 0;
+    comboExpiresRef.current = 0;
+    setCombo(0);
     setRunResult(null);
     // Reset daily RNG so the same daily is reproducible per attempt
     dailyRngRef.current = isDaily ? mulberry32(todaySeed()) : null;
@@ -367,6 +385,7 @@ export default function Game() {
       seconds,
       boosts: boostsThisRunRef.current,
       crashed: true,
+      bestCombo: bestComboRef.current,
     };
     try {
       const cur = await loadProgress();
@@ -445,6 +464,17 @@ export default function Game() {
 
         scoreRef.current += dt * (speedRef.current / BASE_SPEED) * 10;
 
+        // Combo lapses if no coin is grabbed inside the window.
+        if (
+          comboRef.current > 0 &&
+          comboExpiresRef.current > 0 &&
+          now > comboExpiresRef.current
+        ) {
+          comboRef.current = 0;
+          comboExpiresRef.current = 0;
+          setCombo(0);
+        }
+
         cloudOffsetRef.current =
           (cloudOffsetRef.current + speedRef.current * dt * 0.4) % 1000;
 
@@ -520,12 +550,21 @@ export default function Game() {
               if (o.type === "ring") {
                 o.collected = true;
                 collectedRingsRef.current += 1;
-                scoreRef.current += 50;
+                // Bump combo, refresh its lapse timer, then award scaled points.
+                comboRef.current += 1;
+                if (comboRef.current > bestComboRef.current) {
+                  bestComboRef.current = comboRef.current;
+                }
+                comboExpiresRef.current = now + 4000; // 4 s window
+                const mult = Math.min(5, 1 + Math.floor(comboRef.current / 3));
+                const gained = 50 * mult;
+                scoreRef.current += gained;
                 popupsRef.current.push({
                   id: nextId++,
-                  value: 50,
+                  value: gained,
                   t: now,
                 });
+                setCombo(comboRef.current);
                 playSfx("ring", 0.5);
                 if (Platform.OS !== "web") {
                   Haptics.impactAsync(
@@ -533,6 +572,9 @@ export default function Game() {
                   ).catch(() => {});
                 }
               } else {
+                comboRef.current = 0;
+                comboExpiresRef.current = 0;
+                setCombo(0);
                 setCrashFlash(true);
                 setTimeout(() => setCrashFlash(false), 280);
                 playSfx("crash", 0.7);
@@ -815,6 +857,24 @@ export default function Game() {
           </View>
         </View>
 
+        {state === "playing" && combo >= 2 && (
+          <View style={styles.comboWrap} testID="combo-indicator">
+            <View
+              style={[
+                styles.comboPill,
+                combo >= 12 && styles.comboPillHot,
+                combo >= 6 && combo < 12 && styles.comboPillWarm,
+              ]}
+            >
+              <Ionicons name="flame" size={14} color="#0F172A" />
+              <Text style={styles.comboNum}>{combo}</Text>
+              <Text style={styles.comboMult}>
+                x{Math.min(5, 1 + Math.floor(combo / 3))}
+              </Text>
+            </View>
+          </View>
+        )}
+
         {state === "playing" && (
           <View
             style={[styles.cornerBtns, { pointerEvents: "box-none" }]}
@@ -1001,8 +1061,12 @@ export default function Game() {
               <Text style={styles.statValue}>{score}</Text>
             </View>
             <View style={styles.statBox}>
-              <Text style={styles.statLabel}>RINGS</Text>
+              <Text style={styles.statLabel}>COINS</Text>
               <Text style={styles.statValue}>{collectedRingsRef.current}</Text>
+            </View>
+            <View style={styles.statBox}>
+              <Text style={styles.statLabel}>COMBO</Text>
+              <Text style={styles.statValue}>{bestComboRef.current}</Text>
             </View>
             <View style={styles.statBox}>
               <Text style={styles.statLabel}>BEST</Text>
@@ -1218,6 +1282,39 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   hudText: { fontWeight: "900", fontSize: 16, color: "#0F172A" },
+  comboWrap: {
+    alignItems: "center",
+    marginTop: 8,
+  },
+  comboPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: "rgba(255,255,255,0.85)",
+    borderColor: "#0F172A",
+    borderWidth: 2,
+    borderRadius: 999,
+  },
+  comboPillWarm: {
+    backgroundColor: "#FBA5C5",
+  },
+  comboPillHot: {
+    backgroundColor: "#FDE047",
+  },
+  comboNum: {
+    fontWeight: "900",
+    fontSize: 14,
+    color: "#0F172A",
+  },
+  comboMult: {
+    fontWeight: "900",
+    fontSize: 12,
+    color: "#0F172A",
+    opacity: 0.7,
+    letterSpacing: 1,
+  },
   hudLabel: {
     fontSize: 9,
     fontWeight: "800",
