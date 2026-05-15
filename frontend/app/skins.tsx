@@ -43,6 +43,20 @@ export default function Skins() {
   const [purchasing, setPurchasing] = useState<string | null>(null);
   const [polling, setPolling] = useState(false);
   const pollAttemptsRef = useRef(0);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollCancelledRef = useRef(false);
+
+  // Stop any in-flight Stripe poll when this screen unmounts so we don't
+  // call setState / show Alerts on a screen that's already gone.
+  useEffect(() => {
+    return () => {
+      pollCancelledRef.current = true;
+      if (pollTimerRef.current) {
+        clearTimeout(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const refresh = useCallback(async () => {
     const p = await loadProgress();
@@ -100,12 +114,16 @@ export default function Skins() {
   const pollPaymentStatus = async (sessionId: string) => {
     setPolling(true);
     pollAttemptsRef.current = 0;
+    pollCancelledRef.current = false;
     const tick = async () => {
+      if (pollCancelledRef.current) return;
       pollAttemptsRef.current += 1;
       try {
         const s = await getCheckoutStatus(sessionId);
+        if (pollCancelledRef.current) return;
         if (s.payment_status === "paid") {
           await refresh();
+          if (pollCancelledRef.current) return;
           Alert.alert(
             "Purchase complete!",
             s.skin_id ? `Unlocked ${s.skin_id} skin.` : "Skin unlocked."
@@ -123,14 +141,15 @@ export default function Skins() {
           router.setParams({ session_id: undefined });
           return;
         }
-        setTimeout(tick, 2000);
+        pollTimerRef.current = setTimeout(tick, 2000);
       } catch {
+        if (pollCancelledRef.current) return;
         if (pollAttemptsRef.current > 8) {
           setPolling(false);
           router.setParams({ session_id: undefined });
           return;
         }
-        setTimeout(tick, 2000);
+        pollTimerRef.current = setTimeout(tick, 2000);
       }
     };
     tick();

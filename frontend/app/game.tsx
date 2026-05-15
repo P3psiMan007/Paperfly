@@ -125,6 +125,12 @@ export default function Game() {
 
   useEffect(() => {
     stateRef.current = state;
+    // Reset the frame clock whenever we (re)enter the playing state so the
+    // first frame doesn't carry a huge dt from however long we were on the
+    // ready/paused/gameover overlay.
+    if (state === "playing") {
+      lastFrameRef.current = performance.now();
+    }
   }, [state]);
 
   useEffect(() => {
@@ -524,9 +530,12 @@ export default function Game() {
         }
 
         setScore(Math.floor(scoreRef.current));
+        // Only re-render the world when actually playing. While paused / on
+        // overlays / game-over, an idle rAF still runs (so we can resume
+        // cheaply) but skips React state updates.
+        setTick((t) => (t + 1) % 1000000);
       }
 
-      setTick((t) => (t + 1) % 1000000);
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
