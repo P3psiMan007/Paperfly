@@ -23,6 +23,7 @@ import {
 import {
   loadProgress,
   saveProgress,
+  mergeProgress,
   Progress,
   DEFAULT_PROGRESS,
 } from "../src/progression";
@@ -91,10 +92,14 @@ export default function Settings() {
     setRestoring(true);
     try {
       const restored = await fetchSaveByCode(cleaned);
-      const merged: Progress = { ...DEFAULT_PROGRESS, ...restored };
+      const localNow = await loadProgress();
+      const merged = mergeProgress(localNow, restored as Partial<Progress>);
       await saveProgress(merged);
       setProgress(merged);
-      Alert.alert("Restored", "Progress restored from save code.");
+      Alert.alert(
+        "Restored",
+        "Save code applied. Your local high scores and unlocks were kept."
+      );
       setRestoreCode("");
     } catch (e: any) {
       Alert.alert("Restore failed", e?.message || "Save code not found");

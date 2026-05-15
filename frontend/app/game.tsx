@@ -114,6 +114,10 @@ export default function Game() {
   const boostsThisRunRef = useRef(0);
   const wasBoostingRef = useRef(false);
   const calibTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Calibration averaging: sample raw tilt continuously during the hold window
+  // and use the mean, so a single twitch can't lock in a bad neutral pose.
+  const calibSamplerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const calibAccumRef = useRef({ pitch: 0, roll: 0, n: 0 });
 
   const [, setTick] = useState(0);
   const [crashFlash, setCrashFlash] = useState(false);
@@ -144,13 +148,28 @@ export default function Game() {
     };
   }, [shimmerAnim]);
 
-  // Sensor subscription — prefer DeviceMotion (gravity-compensated, more stable)
-  // and only fall back to Accelerometer if DeviceMotion is unavailable.
-  // This avoids both sensors writing into the same ref and fighting each other.
+  // Sensor subscription — prefer DeviceMotion (gravity-compensated, more
+  // stable) and fall back to Accelerometer if DeviceMotion is unavailable OR
+  // never delivers an event within ~600 ms (permission denied / OS quirks).
   useEffect(() => {
     let accelSub: any = null;
     let dmSub: any = null;
     let cancelled = false;
+    let dmEventReceived = false;
+    let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const subscribeAccelerometer = async () => {
+      if (cancelled || accelSub) return;
+      try {
+        const ok = await Accelerometer.isAvailableAsync();
+        if (!cancelled && ok) {
+          Accelerometer.setUpdateInterval(33);
+          accelSub = Accelerometer.addListener(({ x, y }) => {
+            rawTiltRef.current = { roll: x, pitch: y };
+          });
+        }
+      } catch {}
+    };
 
     (async () => {
       let dmAvailable = false;
@@ -164,6 +183,7 @@ export default function Game() {
         try {
           DeviceMotion.setUpdateInterval(33); // ~30 Hz, smoother
           dmSub = DeviceMotion.addListener((data: any) => {
+            dmEventReceived = true;
             const r = data?.rotation;
             if (r) {
               const roll = Math.max(-1, Math.min(1, (r.gamma || 0) / 0.7));
@@ -171,24 +191,26 @@ export default function Game() {
               rawTiltRef.current = { roll, pitch };
             }
           });
+          // If DeviceMotion never delivers an event, fall back.
+          fallbackTimer = setTimeout(() => {
+            if (!cancelled && !dmEventReceived) {
+              try {
+                dmSub?.remove();
+              } catch {}
+              dmSub = null;
+              subscribeAccelerometer();
+            }
+          }, 600);
           return;
         } catch {}
       }
 
-      // Fallback: accelerometer
-      try {
-        const ok = await Accelerometer.isAvailableAsync();
-        if (!cancelled && ok) {
-          Accelerometer.setUpdateInterval(33);
-          accelSub = Accelerometer.addListener(({ x, y }) => {
-            rawTiltRef.current = { roll: x, pitch: y };
-          });
-        }
-      } catch {}
+      await subscribeAccelerometer();
     })();
 
     return () => {
       cancelled = true;
+      if (fallbackTimer) clearTimeout(fallbackTimer);
       if (accelSub) accelSub.remove();
       if (dmSub) dmSub.remove();
     };
@@ -214,8 +236,26 @@ export default function Game() {
       clearInterval(calibTimerRef.current);
       calibTimerRef.current = null;
     }
+    if (calibSamplerRef.current) {
+      clearInterval(calibSamplerRef.current);
+      calibSamplerRef.current = null;
+    }
     setCalibrating(true);
     setCalibCountdown(3);
+    calibAccumRef.current = { pitch: 0, roll: 0, n: 0 };
+
+    // Sample at ~30 Hz throughout the hold window. We skip the very first
+    // ~250 ms of samples so the user's tap-induced motion doesn't bias the
+    // mean.
+    const sampleStart = performance.now();
+    calibSamplerRef.current = setInterval(() => {
+      if (performance.now() - sampleStart < 250) return;
+      const cur = rawTiltRef.current;
+      calibAccumRef.current.pitch += cur.pitch;
+      calibAccumRef.current.roll += cur.roll;
+      calibAccumRef.current.n += 1;
+    }, 33);
+
     let n = 3;
     calibTimerRef.current = setInterval(() => {
       n -= 1;
@@ -226,9 +266,17 @@ export default function Game() {
           clearInterval(calibTimerRef.current);
           calibTimerRef.current = null;
         }
-        const cur = rawTiltRef.current;
-        calibRef.current = { pitch: cur.pitch, roll: cur.roll };
-        saveCalibration(calibRef.current);
+        if (calibSamplerRef.current) {
+          clearInterval(calibSamplerRef.current);
+          calibSamplerRef.current = null;
+        }
+        const a = calibAccumRef.current;
+        const newCal =
+          a.n > 0
+            ? { pitch: a.pitch / a.n, roll: a.roll / a.n }
+            : { ...rawTiltRef.current };
+        calibRef.current = newCal;
+        saveCalibration(newCal);
         setCalibrating(false);
         if (Platform.OS !== "web") {
           Haptics.notificationAsync(
@@ -239,12 +287,16 @@ export default function Game() {
     }, 700);
   };
 
-  // Cleanup calibration timer on unmount
+  // Cleanup calibration timers on unmount
   useEffect(() => {
     return () => {
       if (calibTimerRef.current) {
         clearInterval(calibTimerRef.current);
         calibTimerRef.current = null;
+      }
+      if (calibSamplerRef.current) {
+        clearInterval(calibSamplerRef.current);
+        calibSamplerRef.current = null;
       }
     };
   }, []);

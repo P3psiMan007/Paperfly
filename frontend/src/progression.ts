@@ -85,6 +85,48 @@ export async function saveProgress(p: Progress): Promise<void> {
   }
 }
 
+// Merge a restored save with current local progress without clobbering wins.
+// Numeric stats take the max, arrays union, equipped skin prefers the restore.
+export function mergeProgress(
+  local: Progress,
+  restored: Partial<Progress>
+): Progress {
+  const r: Progress = { ...DEFAULT_PROGRESS, ...restored };
+  const unionArr = <T,>(a: readonly T[] = [], b: readonly T[] = []): T[] =>
+    Array.from(new Set([...a, ...b]));
+  const merged: Progress = {
+    ...r,
+    xp: Math.max(local.xp || 0, r.xp || 0),
+    totalRings: Math.max(local.totalRings || 0, r.totalRings || 0),
+    totalBoosts: Math.max(local.totalBoosts || 0, r.totalBoosts || 0),
+    totalCrashes: Math.max(local.totalCrashes || 0, r.totalCrashes || 0),
+    longestRunSec: Math.max(local.longestRunSec || 0, r.longestRunSec || 0),
+    bestScore: Math.max(local.bestScore || 0, r.bestScore || 0),
+    achievements: unionArr(local.achievements, r.achievements),
+    ownedSkins: unionArr(local.ownedSkins, r.ownedSkins),
+    equippedSkin: r.equippedSkin || local.equippedSkin,
+  };
+  // Daily best: keep the higher score for the matching seed, else newer seed.
+  if (
+    local.lastDailySeed &&
+    r.lastDailySeed &&
+    local.lastDailySeed === r.lastDailySeed
+  ) {
+    merged.lastDailySeed = local.lastDailySeed;
+    merged.lastDailyScore = Math.max(
+      local.lastDailyScore || 0,
+      r.lastDailyScore || 0
+    );
+  } else if (
+    local.lastDailySeed &&
+    local.lastDailySeed > (r.lastDailySeed || "")
+  ) {
+    merged.lastDailySeed = local.lastDailySeed;
+    merged.lastDailyScore = local.lastDailyScore;
+  }
+  return merged;
+}
+
 // Compute XP gained from a run (called once when run ends).
 export function xpFromRun(score: number, rings: number, seconds: number): number {
   return Math.round(score * 0.4 + rings * 6 + seconds * 1.2);
