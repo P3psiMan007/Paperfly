@@ -1,4 +1,20 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Request
+"""Mr. Maybe Flight backend.
+
+Surface area kept deliberately small post-Stripe-removal:
+  POST /api/save           — store a progress blob, return a short code
+  GET  /api/save/{code}    — fetch progress by code
+  GET  /api/                — health
+  POST /api/status         — legacy template (kept for the Emergent harness)
+  GET  /api/status         — legacy template
+
+Hardening:
+  * 1 MB max request body (CloudFront/Vercel ingresses typically allow much
+    more — we cap ourselves so a stray script can't shovel megabytes of
+    junk into Mongo via /save).
+  * Rate limit: 10 saves/min/IP, 60 fetches/min/IP.
+  * Save code: 4-4 with hyphen, uppercase ambiguous-char-free alphabet.
+"""
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -8,13 +24,11 @@ from pathlib import Path
 import logging
 import os
 import secrets
-import string
 from datetime import datetime, timezone
-from emergentintegrations.payments.stripe.checkout import (
-    StripeCheckout,
-    CheckoutSessionRequest,
-    CheckoutStatusResponse,
-)
+
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 
 ROOT_DIR = Path(__file__).parent
@@ -24,19 +38,14 @@ mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ["DB_NAME"]]
 
-STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
-
-# ---------------------------------------------------------------
-# Fixed pricing for premium skins (server-defined to prevent manipulation)
-# ---------------------------------------------------------------
-PREMIUM_SKINS = {
-    "aurora": {"name": "Aurora", "amount": 2.99, "currency": "usd"},
-    "phoenix": {"name": "Phoenix", "amount": 2.99, "currency": "usd"},
-    "galaxy": {"name": "Galaxy", "amount": 2.99, "currency": "usd"},
-}
+MAX_BODY_BYTES = 1 * 1024 * 1024  # 1 MB
 
 app = FastAPI()
 api = APIRouter(prefix="/api")
+
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 # ---------------- Pydantic models ----------------
@@ -50,28 +59,10 @@ class StatusCheckCreate(BaseModel):
     client_name: str
 
 
-class CheckoutCreateBody(BaseModel):
-    skin_id: str
-    device_id: str
-    origin_url: str
-
-
-class CheckoutCreatedResponse(BaseModel):
-    url: str
-    session_id: str
-
-
-class CheckoutStatusResponseModel(BaseModel):
-    status: str
-    payment_status: str
-    skin_id: Optional[str] = None
-    already_owned: bool = False
-
-
 class SaveCreateBody(BaseModel):
     progress: Dict
-    # Optional source device id, so restoring this code can also pull in
-    # premium-skin ownership tied to the original purchasing device.
+    # Optional source device id, recorded alongside the save so a future
+    # IAP/RevenueCat integration can map purchases to a save code if needed.
     device_id: Optional[str] = None
 
 
@@ -81,30 +72,33 @@ class SaveCreatedResponse(BaseModel):
 
 class SaveFetchResponse(BaseModel):
     progress: Dict
-    # Premium skins owned by the device that created this code, if known.
-    owned_skins: list[str] = Field(default_factory=list)
-
-
-class OwnedSkinsResponse(BaseModel):
-    owned: list[str]
-
-
-class TransferDeviceBody(BaseModel):
-    code: str
-    new_device_id: str
-
-
-class TransferDeviceResponse(BaseModel):
-    owned: list[str]
 
 
 # ---------------- Helpers ----------------
 def make_save_code() -> str:
-    # 8-char human-friendly (avoid ambiguous chars)
+    # 8-char human-friendly (avoid ambiguous chars: 0/O, 1/I/L)
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     return "-".join(
         "".join(secrets.choice(alphabet) for _ in range(4)) for _ in range(2)
     )
+
+
+# ---------------- Middleware ----------------
+@app.middleware("http")
+async def cap_body_size(request: Request, call_next):
+    """Reject requests larger than MAX_BODY_BYTES before they touch a handler."""
+    cl = request.headers.get("content-length")
+    if cl is not None:
+        try:
+            if int(cl) > MAX_BODY_BYTES:
+                return Response(
+                    content='{"detail":"Request body too large"}',
+                    status_code=413,
+                    media_type="application/json",
+                )
+        except ValueError:
+            pass
+    return await call_next(request)
 
 
 # ---------------- Routes ----------------
@@ -127,179 +121,11 @@ async def list_status_checks():
 
 
 # -----------------------------------------------------------------
-# Stripe checkout for premium skins
-# -----------------------------------------------------------------
-@api.post("/checkout/session", response_model=CheckoutCreatedResponse)
-async def create_checkout_session(body: CheckoutCreateBody, request: Request):
-    if not STRIPE_API_KEY:
-        raise HTTPException(500, "Stripe not configured")
-    if body.skin_id not in PREMIUM_SKINS:
-        raise HTTPException(400, "Unknown skin")
-
-    pkg = PREMIUM_SKINS[body.skin_id]
-    origin = body.origin_url.rstrip("/")
-    success_url = f"{origin}/skins?session_id={{CHECKOUT_SESSION_ID}}"
-    cancel_url = f"{origin}/skins?cancelled=1"
-
-    host_url = str(request.base_url)
-    webhook_url = f"{host_url.rstrip('/')}/api/webhook/stripe"
-
-    stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
-    metadata = {
-        "skin_id": body.skin_id,
-        "device_id": body.device_id,
-        "source": "mr_maybe_flight",
-    }
-
-    req = CheckoutSessionRequest(
-        amount=float(pkg["amount"]),
-        currency=pkg["currency"],
-        success_url=success_url,
-        cancel_url=cancel_url,
-        metadata=metadata,
-    )
-    session = await stripe_checkout.create_checkout_session(req)
-
-    # Record pending transaction
-    await db.payment_transactions.insert_one(
-        {
-            "session_id": session.session_id,
-            "skin_id": body.skin_id,
-            "device_id": body.device_id,
-            "amount": float(pkg["amount"]),
-            "currency": pkg["currency"],
-            "status": "initiated",
-            "payment_status": "pending",
-            "metadata": metadata,
-            "created_at": datetime.now(timezone.utc),
-        }
-    )
-
-    return CheckoutCreatedResponse(url=session.url, session_id=session.session_id)
-
-
-@api.get("/checkout/status/{session_id}", response_model=CheckoutStatusResponseModel)
-async def get_checkout_status(session_id: str, request: Request):
-    if not STRIPE_API_KEY:
-        raise HTTPException(500, "Stripe not configured")
-
-    host_url = str(request.base_url)
-    webhook_url = f"{host_url.rstrip('/')}/api/webhook/stripe"
-    stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
-
-    try:
-        status: CheckoutStatusResponse = await stripe_checkout.get_checkout_status(
-            session_id
-        )
-    except Exception as e:
-        msg = str(e)
-        if "No such checkout.session" in msg or "not found" in msg.lower():
-            raise HTTPException(404, "Checkout session not found")
-        raise HTTPException(502, f"Stripe error: {msg}")
-
-    tx = await db.payment_transactions.find_one(
-        {"session_id": session_id}, {"_id": 0}
-    )
-    skin_id = tx.get("skin_id") if tx else None
-    device_id = tx.get("device_id") if tx else None
-    already_owned = False
-
-    # Idempotently update transaction + grant skin
-    new_status = status.status
-    new_payment_status = status.payment_status
-    if tx and tx.get("payment_status") != "paid" and new_payment_status == "paid":
-        await db.payment_transactions.update_one(
-            {"session_id": session_id},
-            {
-                "$set": {
-                    "status": new_status,
-                    "payment_status": new_payment_status,
-                    "completed_at": datetime.now(timezone.utc),
-                }
-            },
-        )
-        # Grant skin to device
-        if device_id and skin_id:
-            await db.device_skins.update_one(
-                {"device_id": device_id},
-                {"$addToSet": {"owned": skin_id}},
-                upsert=True,
-            )
-    elif tx:
-        await db.payment_transactions.update_one(
-            {"session_id": session_id},
-            {"$set": {"status": new_status, "payment_status": new_payment_status}},
-        )
-
-    if device_id and skin_id:
-        owned_doc = await db.device_skins.find_one(
-            {"device_id": device_id}, {"_id": 0}
-        )
-        if owned_doc and skin_id in owned_doc.get("owned", []):
-            already_owned = True
-
-    return CheckoutStatusResponseModel(
-        status=new_status,
-        payment_status=new_payment_status,
-        skin_id=skin_id,
-        already_owned=already_owned,
-    )
-
-
-@api.post("/webhook/stripe")
-async def stripe_webhook(request: Request):
-    if not STRIPE_API_KEY:
-        return {"ok": False}
-    try:
-        body = await request.body()
-        host_url = str(request.base_url)
-        webhook_url = f"{host_url.rstrip('/')}/api/webhook/stripe"
-        stripe_checkout = StripeCheckout(
-            api_key=STRIPE_API_KEY, webhook_url=webhook_url
-        )
-        event = await stripe_checkout.handle_webhook(
-            body, request.headers.get("Stripe-Signature")
-        )
-        if event.payment_status == "paid":
-            sid = event.session_id
-            md = event.metadata or {}
-            skin_id = md.get("skin_id")
-            device_id = md.get("device_id")
-            tx = await db.payment_transactions.find_one({"session_id": sid})
-            if tx and tx.get("payment_status") != "paid":
-                await db.payment_transactions.update_one(
-                    {"session_id": sid},
-                    {
-                        "$set": {
-                            "payment_status": "paid",
-                            "status": "complete",
-                            "completed_at": datetime.now(timezone.utc),
-                        }
-                    },
-                )
-                if device_id and skin_id:
-                    await db.device_skins.update_one(
-                        {"device_id": device_id},
-                        {"$addToSet": {"owned": skin_id}},
-                        upsert=True,
-                    )
-        return {"ok": True}
-    except Exception as e:
-        logging.exception("stripe webhook error")
-        raise HTTPException(400, str(e))
-
-
-@api.get("/owned-skins/{device_id}", response_model=OwnedSkinsResponse)
-async def get_owned_skins(device_id: str):
-    doc = await db.device_skins.find_one({"device_id": device_id}, {"_id": 0})
-    return OwnedSkinsResponse(owned=(doc or {}).get("owned", []))
-
-
-# -----------------------------------------------------------------
 # Save / restore progression by code
 # -----------------------------------------------------------------
 @api.post("/save", response_model=SaveCreatedResponse)
-async def create_save(body: SaveCreateBody):
+@limiter.limit("10/minute")
+async def create_save(request: Request, body: SaveCreateBody):
     code = make_save_code()
     # Ensure unique code (rare collision)
     while await db.saves.find_one({"code": code}):
@@ -316,47 +142,17 @@ async def create_save(body: SaveCreateBody):
 
 
 @api.get("/save/{code}", response_model=SaveFetchResponse)
-async def fetch_save(code: str):
+@limiter.limit("60/minute")
+async def fetch_save(request: Request, code: str):
     code = code.upper().strip()
+    # Cheap sanity check before hitting Mongo: codes are always 9 chars
+    # (4-4 with one hyphen). Anything else is a typo or a probe.
+    if len(code) != 9 or code[4] != "-":
+        raise HTTPException(404, "Save code not found")
     doc = await db.saves.find_one({"code": code}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Save code not found")
-    owned_skins: list[str] = []
-    src_device_id = doc.get("device_id")
-    if src_device_id:
-        owned_doc = await db.device_skins.find_one(
-            {"device_id": src_device_id}, {"_id": 0}
-        )
-        owned_skins = list((owned_doc or {}).get("owned", []))
-    return SaveFetchResponse(progress=doc["progress"], owned_skins=owned_skins)
-
-
-@api.post("/transfer-device", response_model=TransferDeviceResponse)
-async def transfer_device(body: TransferDeviceBody):
-    """Copy premium-skin ownership from the save code's original device onto
-    a new device id. Used by the 'Restore Purchases' button on the new
-    device so paid skins survive an app reinstall / phone switch.
-    Idempotent: re-running with the same code + device just re-unions skins.
-    """
-    code = body.code.upper().strip()
-    doc = await db.saves.find_one({"code": code}, {"_id": 0})
-    if not doc:
-        raise HTTPException(404, "Save code not found")
-    src_device_id = doc.get("device_id")
-    if not src_device_id:
-        # Legacy save with no device link — nothing to transfer.
-        return TransferDeviceResponse(owned=[])
-    owned_doc = await db.device_skins.find_one(
-        {"device_id": src_device_id}, {"_id": 0}
-    )
-    owned: list[str] = list((owned_doc or {}).get("owned", []))
-    if owned:
-        await db.device_skins.update_one(
-            {"device_id": body.new_device_id},
-            {"$addToSet": {"owned": {"$each": owned}}},
-            upsert=True,
-        )
-    return TransferDeviceResponse(owned=owned)
+    return SaveFetchResponse(progress=doc["progress"])
 
 
 # Mount router

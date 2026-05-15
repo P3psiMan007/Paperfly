@@ -1,4 +1,4 @@
-import React from "react";
+import React, { memo } from "react";
 import { View } from "react-native";
 import Svg, {
   Path,
@@ -14,11 +14,11 @@ type Props = {
   tilt?: number;
   pitch?: number;
   skinId?: SkinId;
-  shimmerPhase?: number; // 0..1 to drive premium animation
+  shimmerPhase?: number; // 0..1 to drive shimmer/galaxy animation
   flameTick?: number; // 0..1 to drive flame flicker
 };
 
-export default function PaperPlane({
+function PaperPlaneImpl({
   size = 80,
   tilt = 0,
   pitch = 0,
@@ -177,6 +177,13 @@ export default function PaperPlane({
     </View>
   );
 }
+
+// Cheap render guard: skip re-render when props are identical. The
+// gameplay plane gets new tilt/pitch values every frame so it'll always
+// re-render; the skin-grid previews change only on shimmerPhase, which
+// helps when there are 7 instances on-screen at once.
+const PaperPlane = memo(PaperPlaneImpl);
+export default PaperPlane;
 
 // Mix two hex colors, t = 0..1.
 function shadeMix(a: string, b: string, t: number): string {

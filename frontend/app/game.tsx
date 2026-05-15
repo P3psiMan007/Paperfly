@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -7,8 +7,6 @@ import {
   useWindowDimensions,
   PanResponder,
   Platform,
-  Animated,
-  Easing,
   Share,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
@@ -88,13 +86,11 @@ export default function Game() {
   const [brakeActive, setBrakeActive] = useState(false);
   const [calibrating, setCalibrating] = useState(false);
   const [calibCountdown, setCalibCountdown] = useState(3);
-  const [shimmerVal, setShimmerVal] = useState(0);
   // True once we've confirmed (after ~1.2 s) that no tilt sensor is delivering
   // events — happens on desktop browsers and on iOS Safari when motion
   // permission is denied. We show a friendly "open on your phone" overlay
   // instead of a frozen game.
   const [noSensor, setNoSensor] = useState(false);
-  const shimmerAnim = useMemo(() => new Animated.Value(0), []);
 
   const sensRef = useRef(1.0);
   const calibRef = useRef<Calibration>({ pitch: 0, roll: 0 });
@@ -149,22 +145,7 @@ export default function Game() {
     loadSfxEnabled().then(() => {
       preloadSounds().catch(() => {});
     });
-    // Shimmer for skin animation
-    const id = shimmerAnim.addListener(({ value }) => setShimmerVal(value));
-    const loop = Animated.loop(
-      Animated.timing(shimmerAnim, {
-        toValue: 1,
-        duration: 3500,
-        easing: Easing.linear,
-        useNativeDriver: false,
-      })
-    );
-    loop.start();
-    return () => {
-      loop.stop();
-      shimmerAnim.removeListener(id);
-    };
-  }, [shimmerAnim]);
+  }, []);
 
   // Sensor subscription — prefer DeviceMotion (gravity-compensated, more
   // stable) and fall back to Accelerometer if DeviceMotion is unavailable OR
@@ -624,6 +605,11 @@ export default function Game() {
   const cx = SW / 2;
   // Anchor plane at ~62% of screen height (lower-center is the visual focus)
   const planeAnchorY = SH * 0.62;
+  // Shimmer for skin animation: derived from the clock at render time so it
+  // doesn't drive its own setState. The game loop already re-renders every
+  // frame during play (via setTick), so the value updates smoothly without
+  // any extra animation listener.
+  const shimmerVal = (performance.now() % 3500) / 3500;
   const planeWorldX =
     smoothTiltRef.current.roll * sensRef.current * PLANE_X_RANGE;
   const planeWorldY =
