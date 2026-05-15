@@ -841,6 +841,9 @@ export default function Game() {
   // frame during play (via setTick), so the value updates smoothly without
   // any extra animation listener.
   const shimmerVal = (performance.now() % 3500) / 3500;
+  // 0..1 sine used by the splitter render below to throb its warning
+  // border. ~1.3 Hz cycle reads as "telegraphing" without being seizure-y.
+  const splitterPulse = 0.5 + 0.5 * Math.sin(performance.now() * 0.008);
   const planeWorldX =
     smoothTiltRef.current.roll * sensRef.current * PLANE_X_RANGE;
   const planeWorldY =
@@ -912,6 +915,14 @@ export default function Game() {
           </View>
         );
       }
+      const isPendingSplitter = o.willSplit && !o.hasSplit;
+      // Pulse the yellow border alpha 0.45 -> 1.0 so it visibly throbs
+      // before the obstacle breaks apart. Border width stays constant to
+      // avoid per-frame layout work.
+      const splitterBorderAlpha = 0.45 + 0.55 * splitterPulse;
+      // Cross-bar geometry for the inner X marker on pending splitters.
+      const barLen = size * 0.6;
+      const barThick = Math.max(2, size * 0.06);
       return (
         <View
           key={o.id}
@@ -923,16 +934,50 @@ export default function Game() {
               width: size,
               height: size * 0.85,
               borderRadius: size * 0.18,
-              backgroundColor: o.hue,
+              // Pending splitters get a hot orange fill so they pop against
+              // the pastel obstacle palette. Cleared splitters (post-split
+              // children) fall back to the spawn-time hue.
+              backgroundColor: isPendingSplitter ? "#FB923C" : o.hue,
               opacity: 0.55 + 0.45 * opacity,
               pointerEvents: "none",
-              // Splitters get a brighter outline so the player can read them
-              // before they break apart.
-              borderColor: o.willSplit && !o.hasSplit ? "#FDE047" : "#0F172A",
-              borderWidth: o.willSplit && !o.hasSplit ? 3 : 2,
+              borderColor: isPendingSplitter
+                ? `rgba(253, 224, 71, ${splitterBorderAlpha.toFixed(2)})`
+                : "#0F172A",
+              borderWidth: isPendingSplitter ? 3 : 2,
             },
           ]}
-        />
+        >
+          {isPendingSplitter && (
+            <>
+              <View
+                pointerEvents="none"
+                style={{
+                  position: "absolute",
+                  left: (size - barLen) / 2,
+                  top: (size * 0.85 - barThick) / 2,
+                  width: barLen,
+                  height: barThick,
+                  backgroundColor: "#7C2D12",
+                  borderRadius: barThick / 2,
+                  transform: [{ rotate: "45deg" }],
+                }}
+              />
+              <View
+                pointerEvents="none"
+                style={{
+                  position: "absolute",
+                  left: (size - barLen) / 2,
+                  top: (size * 0.85 - barThick) / 2,
+                  width: barLen,
+                  height: barThick,
+                  backgroundColor: "#7C2D12",
+                  borderRadius: barThick / 2,
+                  transform: [{ rotate: "-45deg" }],
+                }}
+              />
+            </>
+          )}
+        </View>
       );
     });
 
