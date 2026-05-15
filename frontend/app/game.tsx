@@ -28,12 +28,16 @@ import {
   PLANE_Y_RANGE,
   WorldObj,
   GameState,
+  PowerupKind,
+  POWERUP_DURATIONS,
+  POWERUP_THEME,
 } from "../src/game/projection";
 import {
   Overlay,
   TiltIndicator,
   BoostLines,
   ParallaxClouds,
+  PowerupHud,
 } from "../src/game/Hud";
 import { Coin } from "../src/game/Coin";
 import {
@@ -129,6 +133,14 @@ export default function Game() {
   // even without crashing (so combos take effort to sustain).
   const comboExpiresRef = useRef(0);
   const [combo, setCombo] = useState(0);
+  // Powerups. Shield is binary (one-shot), magnet/slowmo are timestamps for
+  // when the effect expires. Mirrored to React state for the HUD.
+  const shieldRef = useRef(false);
+  const magnetUntilRef = useRef(0);
+  const slowmoUntilRef = useRef(0);
+  const [shieldActive, setShieldActive] = useState(false);
+  const [magnetUntilHud, setMagnetUntilHud] = useState(0);
+  const [slowmoUntilHud, setSlowmoUntilHud] = useState(0);
   const calibTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Calibration averaging: sample raw tilt continuously during the hold window
   // and use the mean, so a single twitch can't lock in a bad neutral pose.
@@ -137,7 +149,9 @@ export default function Game() {
 
   const [, setTick] = useState(0);
   const [crashFlash, setCrashFlash] = useState(false);
-  const popupsRef = useRef<{ id: number; value: number; t: number }[]>([]);
+  const popupsRef = useRef<
+    { id: number; value: number; t: number; label?: string }[]
+  >([]);
 
   useEffect(() => {
     stateRef.current = state;
@@ -355,6 +369,12 @@ export default function Game() {
     bestComboRef.current = 0;
     comboExpiresRef.current = 0;
     setCombo(0);
+    shieldRef.current = false;
+    magnetUntilRef.current = 0;
+    slowmoUntilRef.current = 0;
+    setShieldActive(false);
+    setMagnetUntilHud(0);
+    setSlowmoUntilHud(0);
     setRunResult(null);
     // Reset daily RNG so the same daily is reproducible per attempt
     dailyRngRef.current = isDaily ? mulberry32(todaySeed()) : null;
@@ -462,7 +482,12 @@ export default function Game() {
           : BASE_SPEED;
         speedRef.current += (target - speedRef.current) * 0.08;
 
-        scoreRef.current += dt * (speedRef.current / BASE_SPEED) * 10;
+        // Slow-mo scales the effective world dt without touching real-time
+        // animation rate. Objects move at 45 % speed while it's active.
+        const slowmoActive = slowmoUntilRef.current > now;
+        const effectiveDt = slowmoActive ? dt * 0.45 : dt;
+
+        scoreRef.current += effectiveDt * (speedRef.current / BASE_SPEED) * 10;
 
         // Combo lapses if no coin is grabbed inside the window.
         if (
@@ -476,7 +501,8 @@ export default function Game() {
         }
 
         cloudOffsetRef.current =
-          (cloudOffsetRef.current + speedRef.current * dt * 0.4) % 1000;
+          (cloudOffsetRef.current + speedRef.current * effectiveDt * 0.4) %
+          1000;
 
         // Cleanup old score popups (>1s)
         if (popupsRef.current.length) {
@@ -489,15 +515,40 @@ export default function Game() {
         if (lastSpawnRef.current >= 0.55) {
           lastSpawnRef.current = 0;
           const rand = dailyRngRef.current ? dailyRngRef.current : Math.random;
-          const isRing = rand() < 0.6;
+          const r0 = rand();
+          // Slot allocation: 5 % powerup, 57 % ring, 38 % obstacle.
+          let type: WorldObj["type"];
+          let powerup: PowerupKind | undefined;
+          if (r0 < 0.05) {
+            type = "powerup";
+            const pr = rand();
+            powerup = pr < 0.4 ? "shield" : pr < 0.75 ? "magnet" : "slowmo";
+          } else if (r0 < 0.62) {
+            type = "ring";
+          } else {
+            type = "obstacle";
+          }
+          const baseSize =
+            type === "ring" ? 55 : type === "powerup" ? 60 : 70 + rand() * 30;
+          const hue =
+            type === "ring"
+              ? "#FDE047"
+              : type === "obstacle"
+              ? rand() < 0.5
+                ? "#FCA5A5"
+                : "#FBA5C5"
+              : powerup
+              ? POWERUP_THEME[powerup].color
+              : "#FFFFFF";
           objectsRef.current.push({
             id: nextId++,
-            type: isRing ? "ring" : "obstacle",
+            type,
             x: (rand() - 0.5) * PLANE_X_RANGE * 2.4,
             y: (rand() - 0.5) * PLANE_Y_RANGE * 2.0,
             z: SPAWN_Z + rand() * 100,
-            baseSize: isRing ? 55 : 70 + rand() * 30,
-            hue: isRing ? "#FDE047" : rand() < 0.5 ? "#FCA5A5" : "#FBA5C5",
+            baseSize,
+            hue,
+            powerup,
           });
         }
 
@@ -517,13 +568,22 @@ export default function Game() {
         const planeScreenYNow =
           planeAnchorYNow + smoothTiltRef.current.pitch * sensRef.current * 70;
 
+        const magnetActive = magnetUntilRef.current > now;
+
         const objs = objectsRef.current;
         for (let i = objs.length - 1; i >= 0; i--) {
           const o = objs[i];
-          o.z -= speedRef.current * dt;
+          o.z -= speedRef.current * effectiveDt;
           if (o.z <= 5) {
             objs.splice(i, 1);
             continue;
+          }
+          // Magnet: pull near rings toward the plane's world position. We
+          // ease X/Y at ~7%/frame while the powerup is live and the ring is
+          // still in range.
+          if (magnetActive && o.type === "ring" && o.z < 350) {
+            o.x += (planeWorldX - o.x) * 0.07;
+            o.y += (planeWorldY - o.y) * 0.07;
           }
           // Collision window slightly wider than before (was z<50). Objects move
           // fast at close range, so we start checking a bit earlier.
@@ -545,6 +605,8 @@ export default function Game() {
             const hitR =
               o.type === "ring"
                 ? projectedSize * 0.45 + PLANE_SIZE * 0.35
+                : o.type === "powerup"
+                ? projectedSize * 0.5 + PLANE_SIZE * 0.35
                 : projectedSize * 0.32 + PLANE_SIZE * 0.22;
             if (distSq < hitR * hitR) {
               if (o.type === "ring") {
@@ -571,15 +633,54 @@ export default function Game() {
                     Haptics.ImpactFeedbackStyle.Light
                   ).catch(() => {});
                 }
+              } else if (o.type === "powerup" && o.powerup) {
+                o.collected = true;
+                const kind = o.powerup;
+                if (kind === "shield") {
+                  shieldRef.current = true;
+                  setShieldActive(true);
+                } else if (kind === "magnet") {
+                  magnetUntilRef.current = now + POWERUP_DURATIONS.magnet;
+                  setMagnetUntilHud(magnetUntilRef.current);
+                } else if (kind === "slowmo") {
+                  slowmoUntilRef.current = now + POWERUP_DURATIONS.slowmo;
+                  setSlowmoUntilHud(slowmoUntilRef.current);
+                }
+                popupsRef.current.push({
+                  id: nextId++,
+                  value: 0,
+                  t: now,
+                  label: POWERUP_THEME[kind].label,
+                });
+                playSfx("boost", 0.5);
+                if (Platform.OS !== "web") {
+                  Haptics.notificationAsync(
+                    Haptics.NotificationFeedbackType.Success
+                  ).catch(() => {});
+                }
               } else {
-                comboRef.current = 0;
-                comboExpiresRef.current = 0;
-                setCombo(0);
-                setCrashFlash(true);
-                setTimeout(() => setCrashFlash(false), 280);
-                playSfx("crash", 0.7);
-                endGame();
-                break;
+                // Obstacle. If a shield is active, consume it and keep flying.
+                if (shieldRef.current) {
+                  shieldRef.current = false;
+                  setShieldActive(false);
+                  o.collected = true; // remove the obstacle that broke the shield
+                  setCrashFlash(true);
+                  setTimeout(() => setCrashFlash(false), 200);
+                  if (Platform.OS !== "web") {
+                    Haptics.impactAsync(
+                      Haptics.ImpactFeedbackStyle.Heavy
+                    ).catch(() => {});
+                  }
+                } else {
+                  comboRef.current = 0;
+                  comboExpiresRef.current = 0;
+                  setCombo(0);
+                  setCrashFlash(true);
+                  setTimeout(() => setCrashFlash(false), 280);
+                  playSfx("crash", 0.7);
+                  endGame();
+                  break;
+                }
               }
             }
           }
@@ -694,6 +795,35 @@ export default function Game() {
           </View>
         );
       }
+      if (o.type === "powerup" && o.powerup) {
+        const theme = POWERUP_THEME[o.powerup];
+        const bob =
+          Math.sin(performance.now() / 240 + o.id * 0.9) * (size * 0.06);
+        return (
+          <View
+            key={o.id}
+            style={[
+              styles.powerupBox,
+              {
+                left: sx - size / 2,
+                top: sy - size / 2 + bob,
+                width: size,
+                height: size,
+                borderRadius: size * 0.22,
+                backgroundColor: theme.color,
+                opacity: 0.85 + 0.15 * opacity,
+                pointerEvents: "none",
+              },
+            ]}
+          >
+            <Ionicons
+              name={theme.icon as any}
+              size={size * 0.55}
+              color="#0F172A"
+            />
+          </View>
+        );
+      }
       return (
         <View
           key={o.id}
@@ -753,13 +883,31 @@ export default function Game() {
 
       {boostActive && <BoostLines SW={SW} SH={SH} />}
 
-      {/* Score popups */}
+      {/* Score popups + powerup pickups */}
       <View style={[StyleSheet.absoluteFill, { pointerEvents: "none" }]}>
         {popupsRef.current.map((p) => {
           const age = (performance.now() - p.t) / 800;
           if (age > 1) return null;
           const opacity = 1 - age;
           const ty = -age * 70;
+          if (p.label) {
+            return (
+              <Text
+                key={p.id}
+                style={[
+                  styles.powerupPopup,
+                  {
+                    left: SW / 2 - 90,
+                    top: SH * 0.55 + ty,
+                    opacity,
+                    transform: [{ scale: 1 + age * 0.4 }],
+                  },
+                ]}
+              >
+                {p.label}
+              </Text>
+            );
+          }
           return (
             <Text
               key={p.id}
@@ -873,6 +1021,14 @@ export default function Game() {
               </Text>
             </View>
           </View>
+        )}
+
+        {state === "playing" && (
+          <PowerupHud
+            shieldActive={shieldActive}
+            magnetUntil={magnetUntilHud}
+            slowmoUntil={slowmoUntilHud}
+          />
         )}
 
         {state === "playing" && (
@@ -1166,6 +1322,25 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: "900",
     color: "#FDE047",
+  },
+  powerupPopup: {
+    position: "absolute",
+    width: 180,
+    textAlign: "center",
+    fontSize: 18,
+    fontWeight: "900",
+    letterSpacing: 2,
+    color: "#FFFFFF",
+    textShadowColor: "rgba(15,23,42,0.6)",
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
+  },
+  powerupBox: {
+    position: "absolute",
+    borderWidth: 2,
+    borderColor: "#0F172A",
+    alignItems: "center",
+    justifyContent: "center",
   },
   rewardBlock: {
     backgroundColor: "rgba(253,224,71,0.35)",

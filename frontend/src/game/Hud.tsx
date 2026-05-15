@@ -1,8 +1,10 @@
 // Small visual subcomponents extracted from app/game.tsx. None of them own
 // game state — they just take props and render. Keep that contract so the
 // game loop never has to import them or worry about their re-render cost.
-import React from "react";
-import { View, StyleSheet } from "react-native";
+import React, { useEffect, useState } from "react";
+import { View, Text, StyleSheet } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { POWERUP_THEME } from "./projection";
 
 export function TiltIndicator({
   tiltX,
@@ -111,6 +113,78 @@ export function Overlay({
   );
 }
 
+// Stacks one badge per active powerup. Magnet/slowmo show a tiny seconds
+// countdown so the player can plan the next move. We tick our own setState
+// at 5 Hz so the countdown numbers update without coupling to the game loop.
+export function PowerupHud({
+  shieldActive,
+  magnetUntil,
+  slowmoUntil,
+}: {
+  shieldActive: boolean;
+  magnetUntil: number;
+  slowmoUntil: number;
+}) {
+  const [, force] = useState(0);
+  useEffect(() => {
+    if (!magnetUntil && !slowmoUntil) return;
+    const id = setInterval(() => force((n) => (n + 1) % 1e6), 200);
+    return () => clearInterval(id);
+  }, [magnetUntil, slowmoUntil]);
+
+  const now = Date.now();
+  const items: {
+    key: string;
+    label: string;
+    color: string;
+    icon: string;
+    secs?: number;
+  }[] = [];
+  if (shieldActive) {
+    items.push({
+      key: "shield",
+      label: POWERUP_THEME.shield.label,
+      color: POWERUP_THEME.shield.color,
+      icon: POWERUP_THEME.shield.icon,
+    });
+  }
+  if (magnetUntil > now) {
+    items.push({
+      key: "magnet",
+      label: POWERUP_THEME.magnet.label,
+      color: POWERUP_THEME.magnet.color,
+      icon: POWERUP_THEME.magnet.icon,
+      secs: Math.ceil((magnetUntil - now) / 1000),
+    });
+  }
+  if (slowmoUntil > now) {
+    items.push({
+      key: "slowmo",
+      label: POWERUP_THEME.slowmo.label,
+      color: POWERUP_THEME.slowmo.color,
+      icon: POWERUP_THEME.slowmo.icon,
+      secs: Math.ceil((slowmoUntil - now) / 1000),
+    });
+  }
+  if (items.length === 0) return null;
+  return (
+    <View style={styles.powerupRow} testID="powerup-row">
+      {items.map((i) => (
+        <View
+          key={i.key}
+          style={[styles.powerupPill, { backgroundColor: i.color }]}
+        >
+          <Ionicons name={i.icon as any} size={12} color="#0F172A" />
+          <Text style={styles.powerupLabel}>{i.label}</Text>
+          {typeof i.secs === "number" && (
+            <Text style={styles.powerupSecs}>{i.secs}s</Text>
+          )}
+        </View>
+      ))}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   cloud: { position: "absolute", backgroundColor: "#FFFFFF" },
   boostLine: {
@@ -166,5 +240,34 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 28,
     alignItems: "center",
+  },
+  powerupRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 6,
+    marginTop: 8,
+    paddingHorizontal: 16,
+  },
+  powerupPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderWidth: 2,
+    borderColor: "#0F172A",
+    borderRadius: 999,
+  },
+  powerupLabel: {
+    fontSize: 10,
+    fontWeight: "900",
+    color: "#0F172A",
+    letterSpacing: 1,
+  },
+  powerupSecs: {
+    fontSize: 10,
+    fontWeight: "900",
+    color: "#0F172A",
+    opacity: 0.7,
   },
 });
