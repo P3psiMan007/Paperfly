@@ -88,6 +88,11 @@ export default function Game() {
   const [calibrating, setCalibrating] = useState(false);
   const [calibCountdown, setCalibCountdown] = useState(3);
   const [shimmerVal, setShimmerVal] = useState(0);
+  // True once we've confirmed (after ~1.2 s) that no tilt sensor is delivering
+  // events — happens on desktop browsers and on iOS Safari when motion
+  // permission is denied. We show a friendly "open on your phone" overlay
+  // instead of a frozen game.
+  const [noSensor, setNoSensor] = useState(false);
   const shimmerAnim = useMemo(() => new Animated.Value(0), []);
 
   const sensRef = useRef(1.0);
@@ -163,12 +168,20 @@ export default function Game() {
   // Sensor subscription — prefer DeviceMotion (gravity-compensated, more
   // stable) and fall back to Accelerometer if DeviceMotion is unavailable OR
   // never delivers an event within ~600 ms (permission denied / OS quirks).
+  // If neither sensor ever fires, surface a "no sensor" overlay so users on
+  // desktop browsers see a clear message instead of an unresponsive plane.
   useEffect(() => {
     let accelSub: any = null;
     let dmSub: any = null;
     let cancelled = false;
+    let anyEventReceived = false;
     let dmEventReceived = false;
     let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+    let noSensorTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const markEvent = () => {
+      anyEventReceived = true;
+    };
 
     const subscribeAccelerometer = async () => {
       if (cancelled || accelSub) return;
@@ -177,6 +190,7 @@ export default function Game() {
         if (!cancelled && ok) {
           Accelerometer.setUpdateInterval(33);
           accelSub = Accelerometer.addListener(({ x, y }) => {
+            markEvent();
             rawTiltRef.current = { roll: x, pitch: y };
           });
         }
@@ -195,6 +209,7 @@ export default function Game() {
         try {
           DeviceMotion.setUpdateInterval(33); // ~30 Hz, smoother
           dmSub = DeviceMotion.addListener((data: any) => {
+            markEvent();
             dmEventReceived = true;
             const r = data?.rotation;
             if (r) {
@@ -213,16 +228,27 @@ export default function Game() {
               subscribeAccelerometer();
             }
           }, 600);
-          return;
-        } catch {}
+        } catch {
+          await subscribeAccelerometer();
+        }
+      } else {
+        await subscribeAccelerometer();
       }
 
-      await subscribeAccelerometer();
+      // Final check: if no tilt event has arrived by 1.2 s after mount,
+      // assume we're somewhere without motion input (desktop browser /
+      // permission denied) and surface a friendly message.
+      noSensorTimer = setTimeout(() => {
+        if (!cancelled && !anyEventReceived) {
+          setNoSensor(true);
+        }
+      }, 1200);
     })();
 
     return () => {
       cancelled = true;
       if (fallbackTimer) clearTimeout(fallbackTimer);
+      if (noSensorTimer) clearTimeout(noSensorTimer);
       if (accelSub) accelSub.remove();
       if (dmSub) dmSub.remove();
     };
@@ -824,7 +850,45 @@ export default function Game() {
         </View>
       )}
 
-      {state === "ready" && (
+      {noSensor && (
+        <Overlay SW={SW}>
+          <View style={styles.noSensorIcon}>
+            <Ionicons name="phone-portrait-outline" size={32} color="#0F172A" />
+          </View>
+          <Text style={styles.overlayEyebrow}>NO TILT SENSOR</Text>
+          <Text style={styles.overlayTitle}>Open on your phone</Text>
+          <Text style={styles.overlaySub}>
+            Mr. Maybe Flight uses your phone's tilt sensor to steer. We can't
+            detect one here — try opening this on an iOS or Android device.
+          </Text>
+          <View
+            style={{
+              backgroundColor: "rgba(181,255,252,0.45)",
+              borderColor: "#0F172A",
+              borderWidth: 2,
+              borderRadius: 12,
+              padding: 12,
+              marginTop: 6,
+              marginBottom: 14,
+            }}
+          >
+            <Text style={styles.noSensorTip}>
+              On iOS Safari you may need to grant Motion &amp; Orientation
+              permission in your phone's Settings → Safari.
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={styles.ghostBtn}
+            onPress={() => router.replace("/")}
+            testID="no-sensor-home"
+          >
+            <Ionicons name="home-outline" size={18} color="#0F172A" />
+            <Text style={styles.ghostBtnText}>Back to menu</Text>
+          </TouchableOpacity>
+        </Overlay>
+      )}
+
+      {state === "ready" && !noSensor && (
         <Overlay SW={SW}>
           <Text style={styles.overlayTitle}>Ready?</Text>
           <Text style={styles.overlaySub}>
@@ -1476,5 +1540,23 @@ const styles = StyleSheet.create({
     marginTop: 4,
     textAlign: "center",
     paddingHorizontal: 30,
+  },
+  noSensorIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: "#0F172A",
+    backgroundColor: "#FDE047",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+  },
+  noSensorTip: {
+    fontSize: 12,
+    color: "#0F172A",
+    fontWeight: "700",
+    textAlign: "center",
+    lineHeight: 17,
   },
 });
