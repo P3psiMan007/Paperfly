@@ -167,8 +167,25 @@ export default function Game() {
 
   const [, setTick] = useState(0);
   const [crashFlash, setCrashFlash] = useState(false);
+  // performance.now() ms until which the environment phase-transition
+  // white-flash overlay is visible. Set on env bucket change; the
+  // render computes a 0..0.45 opacity from how much time remains.
+  const phaseFlashUntilRef = useRef(0);
+  // Popups: floating world labels. `kind` switches the render style.
+  //   - undefined or "score": legacy +N number popup (yellow, floats up).
+  //   - "powerup" / "tier": legacy label popup (white, floats up).
+  //   - "phase": big centered environment banner that fades in then out
+  //     without floating, used by the new act-break treatment.
+  // Adding new kinds here is preferred over new top-level arrays so the
+  // single 1 s cleanup filter keeps owning popup lifetime.
   const popupsRef = useRef<
-    { id: number; value: number; t: number; label?: string }[]
+    {
+      id: number;
+      value: number;
+      t: number;
+      label?: string;
+      kind?: "phase";
+    }[]
   >([]);
 
   useEffect(() => {
@@ -388,6 +405,7 @@ export default function Game() {
     comboExpiresRef.current = 0;
     comboTierRef.current = 1;
     scoreFlashUntilRef.current = 0;
+    phaseFlashUntilRef.current = 0;
     setCombo(0);
     shieldRef.current = false;
     magnetUntilRef.current = 0;
@@ -529,12 +547,22 @@ export default function Game() {
         if (nextEnv.id !== envIdRef.current) {
           envIdRef.current = nextEnv.id;
           setEnv(nextEnv);
+          // Phase transition juice: big centered banner + 600 ms white
+          // flash overlay + warning haptic. Marks the act break so the
+          // sky change feels intentional, not just a UI tick.
+          phaseFlashUntilRef.current = now + 600;
           popupsRef.current.push({
             id: nextId++,
             value: 0,
             t: now,
             label: nextEnv.name.toUpperCase(),
+            kind: "phase",
           });
+          if (Platform.OS !== "web") {
+            Haptics.notificationAsync(
+              Haptics.NotificationFeedbackType.Warning
+            ).catch(() => {});
+          }
         }
 
         cloudOffsetRef.current =
@@ -883,6 +911,13 @@ export default function Game() {
     scoreFlashUntilRef.current - performance.now()
   );
   const scoreScale = 1 + 0.15 * (scoreFlashRemain / 350);
+  // Environment phase-transition flash overlay opacity. Linear fade from
+  // 0.45 at the moment of bucket change down to 0 at the 600 ms mark.
+  const phaseFlashRemain = Math.max(
+    0,
+    phaseFlashUntilRef.current - performance.now()
+  );
+  const phaseFlashOpacity = 0.45 * (phaseFlashRemain / 600);
   const planeWorldX =
     smoothTiltRef.current.roll * sensRef.current * PLANE_X_RANGE;
   const planeWorldY =
@@ -1060,9 +1095,50 @@ export default function Game() {
 
       {boostActive && <BoostLines SW={SW} SH={SH} />}
 
+      {/* Environment phase-transition flash overlay. Sits above the world
+          and BoostLines so it tints them, but below popups + HUD so the
+          banner text and score stay legible during the 600 ms window. */}
+      {phaseFlashOpacity > 0 && (
+        <View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFill,
+            { backgroundColor: "#FFFFFF", opacity: phaseFlashOpacity },
+          ]}
+        />
+      )}
+
       {/* Score popups + powerup pickups */}
       <View style={[StyleSheet.absoluteFill, { pointerEvents: "none" }]}>
         {popupsRef.current.map((p) => {
+          // Phase banner: own 600 ms life with fade-in / hold / fade-out.
+          // Checked before the generic label branch so env transitions get
+          // the dedicated treatment instead of the float-up powerup style.
+          if (p.kind === "phase") {
+            const elapsed = performance.now() - p.t;
+            if (elapsed > 600) return null;
+            const phaseOp =
+              elapsed < 150
+                ? elapsed / 150
+                : elapsed > 400
+                ? Math.max(0, (600 - elapsed) / 200)
+                : 1;
+            return (
+              <Text
+                key={p.id}
+                style={[
+                  styles.phasePopup,
+                  {
+                    left: SW / 2 - 160,
+                    top: SH * 0.4,
+                    opacity: phaseOp,
+                  },
+                ]}
+              >
+                {p.label}
+              </Text>
+            );
+          }
           const age = (performance.now() - p.t) / 800;
           if (age > 1) return null;
           const opacity = 1 - age;
@@ -1517,6 +1593,18 @@ const styles = StyleSheet.create({
     textShadowColor: "rgba(15,23,42,0.6)",
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
+  },
+  phasePopup: {
+    position: "absolute",
+    width: 320,
+    textAlign: "center",
+    fontSize: 38,
+    fontWeight: "900",
+    letterSpacing: 5,
+    color: "#FFFFFF",
+    textShadowColor: "rgba(15,23,42,0.75)",
+    textShadowOffset: { width: 0, height: 3 },
+    textShadowRadius: 8,
   },
   powerupBox: {
     position: "absolute",
