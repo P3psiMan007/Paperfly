@@ -171,6 +171,23 @@ export default function Game() {
   // white-flash overlay is visible. Set on env bucket change; the
   // render computes a 0..0.45 opacity from how much time remains.
   const phaseFlashUntilRef = useRef(0);
+  // Coin-collect particle burst. Plain absolutely-positioned Views.
+  // Position is screen-space, velocity is px/sec, life is ms. Same
+  // dumb-struct shape as popupsRef so the loop owns spawning, ticking,
+  // and culling without any new abstractions.
+  const particlesRef = useRef<
+    {
+      id: number;
+      x: number;
+      y: number;
+      vx: number;
+      vy: number;
+      t: number;
+      life: number;
+      size: number;
+      color: string;
+    }[]
+  >([]);
   // Popups: floating world labels. `kind` switches the render style.
   //   - undefined or "score": legacy +N number popup (yellow, floats up).
   //   - "powerup" / "tier": legacy label popup (white, floats up).
@@ -406,6 +423,7 @@ export default function Game() {
     comboTierRef.current = 1;
     scoreFlashUntilRef.current = 0;
     phaseFlashUntilRef.current = 0;
+    particlesRef.current = [];
     setCombo(0);
     shieldRef.current = false;
     magnetUntilRef.current = 0;
@@ -573,6 +591,20 @@ export default function Game() {
         if (popupsRef.current.length) {
           popupsRef.current = popupsRef.current.filter(
             (p) => now - p.t < 1000
+          );
+        }
+
+        // Advance + cull coin-collect particles. effectiveDt so slow-mo
+        // also slows the radiation; the burst feels coherent with the
+        // rest of the slowed world. Cheap O(n) walk, n caps at ~30 per
+        // tier-5 grab so this is trivial.
+        if (particlesRef.current.length) {
+          for (const pt of particlesRef.current) {
+            pt.x += pt.vx * effectiveDt;
+            pt.y += pt.vy * effectiveDt;
+          }
+          particlesRef.current = particlesRef.current.filter(
+            (pt) => now - pt.t < pt.life
           );
         }
 
@@ -772,6 +804,32 @@ export default function Game() {
                   value: gained,
                   t: now,
                 });
+                // Coin-burst firework. 6 particles at ×1, scales with the
+                // active multiplier so a ×5 grab puts ~30 sparks on screen.
+                // Spawned at the projected collision point so the visual
+                // ties to the coin the player just hit. Angles are a
+                // pseudo-uniform fan plus a small jitter so they don't
+                // look like a perfect wheel.
+                const burstCount = 6 * mult;
+                const baseAng = Math.random() * Math.PI * 2;
+                for (let bi = 0; bi < burstCount; bi++) {
+                  const ang =
+                    baseAng +
+                    (bi / burstCount) * Math.PI * 2 +
+                    (Math.random() - 0.5) * 0.35;
+                  const speed = 220 + Math.random() * 160; // px/sec
+                  particlesRef.current.push({
+                    id: nextId++,
+                    x: sx,
+                    y: sy,
+                    vx: Math.cos(ang) * speed,
+                    vy: Math.sin(ang) * speed,
+                    t: now,
+                    life: 250,
+                    size: 4 + Math.random() * 3,
+                    color: "#FDE047",
+                  });
+                }
                 setCombo(comboRef.current);
                 playSfx("ring", 0.5);
                 if (Platform.OS !== "web") {
@@ -1107,6 +1165,33 @@ export default function Game() {
           ]}
         />
       )}
+
+      {/* Coin-collect particles. Above the world + phase flash so they
+          read on every background, below popups + HUD so they never
+          obscure score text. Position is screen-space; the loop already
+          advanced it this frame. */}
+      <View style={[StyleSheet.absoluteFill, { pointerEvents: "none" }]}>
+        {particlesRef.current.map((pt) => {
+          const age = (performance.now() - pt.t) / pt.life;
+          if (age >= 1) return null;
+          return (
+            <View
+              key={pt.id}
+              pointerEvents="none"
+              style={{
+                position: "absolute",
+                left: pt.x - pt.size / 2,
+                top: pt.y - pt.size / 2,
+                width: pt.size,
+                height: pt.size,
+                borderRadius: pt.size / 2,
+                backgroundColor: pt.color,
+                opacity: 1 - age,
+              }}
+            />
+          );
+        })}
+      </View>
 
       {/* Score popups + powerup pickups */}
       <View style={[StyleSheet.absoluteFill, { pointerEvents: "none" }]}>
