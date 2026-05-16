@@ -32,6 +32,15 @@ export type WorldObj = {
   // a close-range threshold (z < 250) and then never splits again.
   willSplit?: boolean;
   hasSplit?: boolean;
+  // For type === "obstacle": minimum screen-space distance between the
+  // plane center and this obstacle's center, tracked while in the
+  // collision window (z < 80). Used by the near-miss bonus once z drops
+  // below 30 — a close-but-not-hit pass awards +25.
+  closestDist?: number;
+  // For type === "obstacle": set true after the near-miss check has been
+  // resolved (either awarded or skipped). Prevents re-firing as z keeps
+  // dropping toward the cull threshold.
+  passed?: boolean;
 };
 
 // Durations (ms) each powerup stays active after pickup.

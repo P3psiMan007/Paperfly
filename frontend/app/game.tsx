@@ -760,6 +760,16 @@ export default function Game() {
             const dx = sx - planeScreenXNow;
             const dy = sy - planeScreenYNow;
             const distSq = dx * dx + dy * dy;
+            // Near-miss tracking: for obstacles, sample the minimum
+            // screen-space distance across every frame the obstacle is
+            // inside the collision window. Latches at the closest pass
+            // so we can score the bonus the moment the obstacle clears.
+            if (o.type === "obstacle") {
+              const dist = Math.sqrt(distSq);
+              if (o.closestDist === undefined || dist < o.closestDist) {
+                o.closestDist = dist;
+              }
+            }
             // Screen-space hit radii: tuned so visible overlap = collision.
             // Rings remain generous; obstacles must visually touch the sprite.
             const hitR =
@@ -885,6 +895,38 @@ export default function Game() {
                   playSfx("crash", 0.7);
                   endGame();
                   break;
+                }
+              }
+            }
+            // Near-miss bonus: once the obstacle has slipped past the
+            // plane's z plane without crashing, check whether the
+            // closest screen-space approach was inside the bonus radius
+            // (90 px from plane center). Shield-active grabs are excluded
+            // because the shield path uses different geometry — clipping
+            // a shielded obstacle is not a skill flex.
+            if (
+              o.type === "obstacle" &&
+              !o.collected &&
+              !o.passed &&
+              o.z < 30
+            ) {
+              o.passed = true;
+              if (
+                !shieldRef.current &&
+                o.closestDist !== undefined &&
+                o.closestDist < 90
+              ) {
+                scoreRef.current += 25;
+                popupsRef.current.push({
+                  id: nextId++,
+                  value: 0,
+                  t: now,
+                  label: "NEAR MISS +25",
+                });
+                if (Platform.OS !== "web") {
+                  Haptics.impactAsync(
+                    Haptics.ImpactFeedbackStyle.Light
+                  ).catch(() => {});
                 }
               }
             }
