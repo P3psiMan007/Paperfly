@@ -1052,6 +1052,18 @@ export default function Game() {
         // the disc size — keeping size stable so hit-feel stays predictable).
         const pulse =
           0.5 + 0.5 * Math.sin(performance.now() / 260 + o.id * 0.7);
+        // ScaleX-driven spin illusion. Compresses to 0.3 and expands back
+        // to 1.0 on a ~1.3 s cycle — reads as a coin flipping edge-on and
+        // face-on. Per-coin id phase so a wall of coins doesn't flip in
+        // lockstep. Compressed at minimum but never inverted (negative
+        // scaleX would flip the glyph backwards).
+        const spinPhase = Math.cos(performance.now() / 480 + o.id * 0.7);
+        const spin = 0.3 + 0.7 * (0.5 + 0.5 * spinPhase);
+        // 0..1 glint phase — slower than spin, slightly offset per coin
+        // so the bright spot doesn't track the spin in a way that reads
+        // as one combined motion.
+        const glint =
+          0.5 + 0.5 * Math.sin(performance.now() / 700 + o.id * 1.3);
         return (
           <View
             key={o.id}
@@ -1062,11 +1074,13 @@ export default function Game() {
               width: size,
               height: size,
               pointerEvents: "none",
+              transform: [{ scaleX: spin }],
             }}
           >
             <Coin
               size={size}
               pulse={pulse}
+              glint={glint}
               opacity={0.6 + 0.4 * opacity}
             />
           </View>
