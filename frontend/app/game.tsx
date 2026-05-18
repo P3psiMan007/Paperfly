@@ -631,9 +631,12 @@ export default function Game() {
             type === "ring"
               ? "#FDE047"
               : type === "obstacle"
-              ? rand() < 0.5
-                ? "#FCA5A5"
-                : "#FBA5C5"
+              ? // Saturated reds (red-600 / rose-600) instead of the old
+                // pastel pink — obstacles need to say "dodge me", not
+                // "soft pillow". Splitters override this fill anyway.
+                rand() < 0.5
+                ? "#DC2626"
+                : "#E11D48"
               : powerup
               ? POWERUP_THEME[powerup].color
               : "#FFFFFF";
@@ -641,6 +644,7 @@ export default function Game() {
           // Drift and split can both apply to the same obstacle.
           let vx: number | undefined;
           let willSplit = false;
+          let variant: 0 | 1 | 2 | undefined;
           if (type === "obstacle") {
             if (rand() < 0.25) {
               const dir = rand() < 0.5 ? -1 : 1;
@@ -649,6 +653,13 @@ export default function Game() {
             if (rand() < 0.1) {
               willSplit = true;
             }
+            // Visual variant distribution: 50 % chevron, 30 % warning,
+            // 20 % lozenge. Splitter render takes precedence, so a
+            // splitter that rolled variant 2 (rotated) still shows
+            // the upright orange + X marker; the variant just affects
+            // its post-split children.
+            const vr = rand();
+            variant = vr < 0.5 ? 0 : vr < 0.8 ? 1 : 2;
           }
           objectsRef.current.push({
             id: nextId++,
@@ -661,6 +672,7 @@ export default function Game() {
             powerup,
             vx,
             willSplit,
+            variant,
           });
         }
 
@@ -1097,6 +1109,13 @@ export default function Game() {
       // Cross-bar geometry for the inner X marker on pending splitters.
       const barLen = size * 0.6;
       const barThick = Math.max(2, size * 0.06);
+      // Lozenge variant rotates the whole tile 45° for silhouette
+      // variety. Splitters always render upright so the orange + X
+      // signal stays unambiguous.
+      const isLozenge = !isPendingSplitter && o.variant === 2;
+      const obstacleH = size * 0.85;
+      const chevSize = size * 0.32;
+      const warnSize = size * 0.5;
       return (
         <View
           key={o.id}
@@ -1106,11 +1125,11 @@ export default function Game() {
               left: sx - size / 2,
               top: sy - size / 2,
               width: size,
-              height: size * 0.85,
+              height: obstacleH,
               borderRadius: size * 0.18,
-              // Pending splitters get a hot orange fill so they pop against
-              // the pastel obstacle palette. Cleared splitters (post-split
-              // children) fall back to the spawn-time hue.
+              // Pending splitters get a hot orange fill so they pop
+              // against the obstacle palette. Cleared splitters
+              // (post-split children) fall back to the spawn-time hue.
               backgroundColor: isPendingSplitter ? "#FB923C" : o.hue,
               opacity: 0.55 + 0.45 * opacity,
               pointerEvents: "none",
@@ -1118,9 +1137,69 @@ export default function Game() {
                 ? `rgba(253, 224, 71, ${splitterBorderAlpha.toFixed(2)})`
                 : "#0F172A",
               borderWidth: isPendingSplitter ? 3 : 2,
+              transform: isLozenge ? [{ rotate: "45deg" }] : undefined,
             },
           ]}
         >
+          {/* Weight stripe — dark band at the bottom 25 % gives every
+              tile a sense of mass / 3D sit. Skipped on lozenges because
+              their "bottom" rotates with the tile and becomes a corner. */}
+          {!isLozenge && (
+            <View
+              pointerEvents="none"
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                bottom: 0,
+                height: obstacleH * 0.25,
+                backgroundColor: "rgba(15,23,42,0.3)",
+                borderBottomLeftRadius: size * 0.18,
+                borderBottomRightRadius: size * 0.18,
+              }}
+            />
+          )}
+          {/* Variant 0: two stacked chevron-downs. "Highway hazard"
+              read — pulls the eye toward the bottom of the tile, which
+              is the side closest to the player. */}
+          {!isPendingSplitter && o.variant === 0 && (
+            <>
+              <Ionicons
+                name="chevron-down"
+                size={chevSize}
+                color="rgba(255,255,255,0.9)"
+                style={{
+                  position: "absolute",
+                  left: size / 2 - chevSize / 2,
+                  top: obstacleH * 0.15,
+                }}
+              />
+              <Ionicons
+                name="chevron-down"
+                size={chevSize}
+                color="rgba(255,255,255,0.9)"
+                style={{
+                  position: "absolute",
+                  left: size / 2 - chevSize / 2,
+                  top: obstacleH * 0.45,
+                }}
+              />
+            </>
+          )}
+          {/* Variant 1: centered warning glyph. Universal "this thing
+              is dangerous" icon — no learning curve. */}
+          {!isPendingSplitter && o.variant === 1 && (
+            <Ionicons
+              name="warning"
+              size={warnSize}
+              color="rgba(255,255,255,0.92)"
+              style={{
+                position: "absolute",
+                left: size / 2 - warnSize / 2,
+                top: obstacleH / 2 - warnSize / 2,
+              }}
+            />
+          )}
           {isPendingSplitter && (
             <>
               <View
@@ -1128,7 +1207,7 @@ export default function Game() {
                 style={{
                   position: "absolute",
                   left: (size - barLen) / 2,
-                  top: (size * 0.85 - barThick) / 2,
+                  top: (obstacleH - barThick) / 2,
                   width: barLen,
                   height: barThick,
                   backgroundColor: "#7C2D12",
@@ -1141,7 +1220,7 @@ export default function Game() {
                 style={{
                   position: "absolute",
                   left: (size - barLen) / 2,
-                  top: (size * 0.85 - barThick) / 2,
+                  top: (obstacleH - barThick) / 2,
                   width: barLen,
                   height: barThick,
                   backgroundColor: "#7C2D12",

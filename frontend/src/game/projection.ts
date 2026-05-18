@@ -32,6 +32,12 @@ export type WorldObj = {
   // a close-range threshold (z < 250) and then never splits again.
   willSplit?: boolean;
   hasSplit?: boolean;
+  // Visual variant assigned at spawn time for standard obstacles. Drives
+  // which inner glyph (chevron / warning) is drawn and whether the
+  // silhouette is rotated 45° (lozenge). Pending splitters override this
+  // and always show the hot-orange + X-marker treatment.
+  //   0 = chevron arrows, 1 = warning icon, 2 = lozenge / diamond.
+  variant?: 0 | 1 | 2;
   // For type === "obstacle": minimum screen-space distance between the
   // plane center and this obstacle's center, tracked while in the
   // collision window (z < 80). Used by the near-miss bonus once z drops
