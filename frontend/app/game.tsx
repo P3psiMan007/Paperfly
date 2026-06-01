@@ -8,6 +8,7 @@ import {
   PanResponder,
   Platform,
   Share,
+  Alert,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -488,6 +489,28 @@ export default function Game() {
     } catch (e) {
       console.warn("apply run failed", e);
     }
+  };
+
+  // Quitting mid-run throws away the current score, so confirm it with the
+  // amount at stake (loss-aversion framing — see the research brief §2.3).
+  const confirmQuit = () => {
+    const cur = Math.floor(scoreRef.current);
+    if (cur <= 0) {
+      router.replace("/");
+      return;
+    }
+    Alert.alert(
+      "Quit this run?",
+      `You'll lose your current ${cur} points.`,
+      [
+        { text: "Keep flying", style: "cancel" },
+        {
+          text: "Quit",
+          style: "destructive",
+          onPress: () => router.replace("/"),
+        },
+      ]
+    );
   };
 
   const shareScore = async () => {
@@ -1676,7 +1699,7 @@ export default function Game() {
               variant="secondary"
               size="md"
               flex
-              onPress={() => router.replace("/")}
+              onPress={confirmQuit}
               testID="quit-button"
             />
           </View>

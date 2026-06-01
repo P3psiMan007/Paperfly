@@ -54,10 +54,24 @@ export default function Settings() {
     saveSensitivity(v);
   };
 
-  const resetHighScore = async () => {
-    const next = { ...progress, bestScore: 0 };
-    await saveProgress(next);
-    setProgress(next);
+  const resetHighScore = () => {
+    if (progress.bestScore <= 0) return;
+    Alert.alert(
+      "Reset high score?",
+      `Your best of ${progress.bestScore} will be permanently erased. This can't be undone.`,
+      [
+        { text: "Keep it", style: "cancel" },
+        {
+          text: "Reset",
+          style: "destructive",
+          onPress: async () => {
+            const next = { ...progress, bestScore: 0 };
+            await saveProgress(next);
+            setProgress(next);
+          },
+        },
+      ]
+    );
   };
 
   const toggleSound = async (v: boolean) => {
