@@ -2239,7 +2239,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   dailyTagText: {
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: "900",
     color: "#0F172A",
     letterSpacing: 1.5,
@@ -2339,7 +2339,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   hudLabel: {
-    fontSize: 9,
+    fontSize: 12,
     fontWeight: "800",
     letterSpacing: 2,
     color: "#0F172A",
@@ -2457,7 +2457,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#FDE047",
   },
   statLabel: {
-    fontSize: 10,
+    fontSize: 12,
     letterSpacing: 2,
     fontWeight: "800",
     color: "#0F172A",

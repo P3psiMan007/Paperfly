@@ -282,16 +282,18 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   powerupLabel: {
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: "900",
     color: "#0F172A",
     letterSpacing: 1,
   },
   powerupSecs: {
-    fontSize: 10,
+    // The live countdown is information the player reads mid-run, so it gets
+    // a comfortably legible size (mobile-portrait minimum is ~14px).
+    fontSize: 14,
     fontWeight: "900",
     color: "#0F172A",
-    opacity: 0.7,
+    opacity: 0.8,
   },
   powerupBarTrack: {
     position: "absolute",
