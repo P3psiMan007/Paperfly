@@ -97,7 +97,13 @@ export function GameButton({
 }: Props) {
   const [pressed, setPressed] = useState(false);
   const inert = disabled || loading;
-  const hasShadow = variant !== "ghost";
+  // Only the high-emphasis, OPAQUE-fill variants get the raised neo-brutalist
+  // hard shadow. The secondary/ghost variants have translucent fills, and a
+  // dark shadow behind a translucent fill bleeds through and reads as a muddy
+  // dark button — which flattened the menu's hierarchy and looked off against
+  // the soft pastel background. Those stay flat + clean and use a scale press.
+  const hasShadow =
+    variant === "primary" || variant === "cyan" || variant === "danger";
   const sz = SIZE_PAD[size];
   const fill = VARIANT_FILL[variant];
   const textColor = VARIANT_TEXT[variant];
@@ -132,9 +138,13 @@ export function GameButton({
     outputRange: [1, 1.04],
   });
 
-  // How far the button rides above its shadow. Collapses to 0 on press.
+  // Press feedback. Raised (shadowed) buttons push down onto their shadow;
+  // flat buttons (secondary/ghost) scale down slightly since they have no
+  // shadow to collapse into.
   const lift = hasShadow ? SHADOW.offset : 0;
-  const translateY = pressed && !inert ? lift : 0;
+  const pressActive = pressed && !inert;
+  const translateY = pressActive ? lift : 0;
+  const pressScale = !hasShadow && pressActive ? 0.97 : 1;
 
   return (
     <Animated.View
@@ -182,7 +192,7 @@ export function GameButton({
               borderRadius: RADII.xl,
               paddingVertical: sz.v,
               opacity: disabled ? 0.5 : 1,
-              transform: [{ translateY }],
+              transform: [{ translateY }, { scale: pressScale }],
             },
           ]}
         >
