@@ -64,6 +64,8 @@ import { SKINS, ACHIEVEMENTS, AchievementId, SkinId } from "../src/skins";
 import { mulberry32, todaySeed, todaySeedString } from "../src/daily";
 import { playSfx, preloadSounds, loadSfxEnabled } from "../src/audio";
 import { GameButton } from "../src/ui/GameButton";
+import { Confetti } from "../src/ui/Confetti";
+import { Reveal } from "../src/ui/Reveal";
 
 // Map of which skins unlock from which achievement (kept here to avoid circular imports)
 // Which achievement unlocks which skin. The reverse map (skin -> achievement)
@@ -98,6 +100,21 @@ export default function Game() {
   const [score, setScore] = useState(0);
   const [progress, setProgress] = useState<Progress>(DEFAULT_PROGRESS);
   const [runResult, setRunResult] = useState<RunResult | null>(null);
+  // Snapshot captured at game-over for the results screen: the final score, the
+  // best/longest BEFORE this run was applied (so we can show "+N vs best"
+  // deltas), used by the count-up reveal and diff chips.
+  const [runSnapshot, setRunSnapshot] = useState<{
+    score: number;
+    prevBest: number;
+    seconds: number;
+    prevLongest: number;
+  } | null>(null);
+  // Score number that counts up on the game-over screen (0 → final).
+  const [countScore, setCountScore] = useState(0);
+  // Set true ~2s after game over to start the "tap to retry" button pulse.
+  const [retryPulse, setRetryPulse] = useState(false);
+  // Bumped each game over so the confetti + staggered reveals re-fire.
+  const [gameOverNonce, setGameOverNonce] = useState(0);
   const [boostActive, setBoostActive] = useState(false);
   const [brakeActive, setBrakeActive] = useState(false);
   const [calibrating, setCalibrating] = useState(false);
@@ -216,6 +233,46 @@ export default function Game() {
       lastFrameRef.current = performance.now();
     }
   }, [state]);
+
+  // Game-over results animation: count the score up from 0 to final with an
+  // ease-out, ticking a soft chime + light haptic at every 250 points so the
+  // reveal has anticipation instead of just printing a number (research §1.4 /
+  // audit 2.4.1). Then, after ~2s, start the retry-button pulse (audit 2.4.7).
+  useEffect(() => {
+    if (state !== "gameover" || !runSnapshot) return;
+    const target = runSnapshot.score;
+    const dur = 1200;
+    const start = performance.now();
+    let raf = 0;
+    let lastBucket = -1;
+    const step = () => {
+      const t = Math.min(1, (performance.now() - start) / dur);
+      const eased = 1 - Math.pow(1 - t, 3); // easeOutCubic
+      const val = Math.round(target * eased);
+      setCountScore(val);
+      const bucket = Math.floor(val / 250);
+      if (bucket > lastBucket && val < target && val > 0) {
+        lastBucket = bucket;
+        playSfx("ring", 0.22);
+        if (Platform.OS !== "web") {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
+            () => {}
+          );
+        }
+      }
+      if (t < 1) {
+        raf = requestAnimationFrame(step);
+      } else {
+        setCountScore(target);
+      }
+    };
+    raf = requestAnimationFrame(step);
+    const pulseTimer = setTimeout(() => setRetryPulse(true), 2000);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(pulseTimer);
+    };
+  }, [state, runSnapshot]);
 
   useEffect(() => {
     loadSensitivity().then((s) => (sensRef.current = s));
@@ -436,6 +493,9 @@ export default function Game() {
     envIdRef.current = ENVIRONMENTS[0].id;
     setEnv(ENVIRONMENTS[0]);
     setRunResult(null);
+    setRunSnapshot(null);
+    setCountScore(0);
+    setRetryPulse(false);
     // Reset daily RNG so the same daily is reproducible per attempt
     dailyRngRef.current = isDaily ? mulberry32(todaySeed()) : null;
   };
@@ -483,9 +543,17 @@ export default function Game() {
         next.lastDailySeed = seedStr;
         next.lastDailyScore = Math.max(prevDaily, finalScore);
       }
+      // Snapshot the pre-run best/longest for the results-screen deltas.
+      setRunSnapshot({
+        score: finalScore,
+        prevBest: cur.bestScore,
+        seconds,
+        prevLongest: cur.longestRunSec,
+      });
       await saveProgress(next);
       setProgress(next);
       setRunResult(result);
+      setGameOverNonce((n) => n + 1);
     } catch (e) {
       console.warn("apply run failed", e);
     }
@@ -1708,6 +1776,9 @@ export default function Game() {
 
       {state === "gameover" && (
         <Overlay SW={SW}>
+          {runResult?.newBestScore && (
+            <Confetti width={SW - 60} trigger={gameOverNonce} />
+          )}
           {isDaily && (
             <View style={styles.dailyTag}>
               <Ionicons name="calendar" size={11} color="#0F172A" />
@@ -1716,12 +1787,28 @@ export default function Game() {
               </Text>
             </View>
           )}
-          <Text style={styles.overlayEyebrow}>CRASHED</Text>
-          <Text style={styles.overlayTitle}>Game Over</Text>
+          <Text style={styles.overlayEyebrow}>
+            {runResult?.newBestScore ? "★ NEW BEST ★" : "CRASHED"}
+          </Text>
+          <Text style={styles.overlayTitle}>
+            {runResult?.newBestScore ? "New Record!" : "Game Over"}
+          </Text>
           <View style={styles.statsRow}>
-            <View style={styles.statBox}>
+            <View
+              style={[
+                styles.statBox,
+                runResult?.newBestScore && styles.statBoxBest,
+              ]}
+            >
               <Text style={styles.statLabel}>SCORE</Text>
-              <Text style={styles.statValue}>{score}</Text>
+              <Text
+                style={[
+                  styles.statValue,
+                  runResult?.newBestScore && styles.statValueBest,
+                ]}
+              >
+                {countScore}
+              </Text>
             </View>
             <View style={styles.statBox}>
               <Text style={styles.statLabel}>COINS</Text>
@@ -1729,7 +1816,7 @@ export default function Game() {
             </View>
             <View style={styles.statBox}>
               <Text style={styles.statLabel}>COMBO</Text>
-              <Text style={styles.statValue}>{bestComboRef.current}</Text>
+              <Text style={styles.statValue}>×{bestComboRef.current}</Text>
             </View>
             <View style={styles.statBox}>
               <Text style={styles.statLabel}>BEST</Text>
@@ -1737,28 +1824,85 @@ export default function Game() {
             </View>
           </View>
 
+          {/* Diff chips — frame the run against the player's own history,
+              which is what drives the retry (research §2.3 / audit 2.4.2). */}
+          {runSnapshot &&
+            (() => {
+              const chips: { key: string; text: string; good?: boolean }[] = [];
+              const vsBest = runSnapshot.score - runSnapshot.prevBest;
+              if (runResult?.newBestScore && runSnapshot.prevBest > 0) {
+                chips.push({
+                  key: "best",
+                  text: `+${vsBest} over your old best`,
+                  good: true,
+                });
+              } else if (!runResult?.newBestScore && runSnapshot.prevBest > 0) {
+                chips.push({
+                  key: "best",
+                  text: `${runSnapshot.prevBest - runSnapshot.score} to beat your best`,
+                });
+              }
+              if (
+                runSnapshot.seconds > runSnapshot.prevLongest &&
+                runSnapshot.seconds > 0
+              ) {
+                chips.push({
+                  key: "long",
+                  text: `Longest flight yet · ${runSnapshot.seconds}s`,
+                  good: true,
+                });
+              }
+              if (chips.length === 0) return null;
+              return (
+                <View style={styles.diffRow}>
+                  {chips.map((c) => (
+                    <View
+                      key={c.key}
+                      style={[styles.diffChip, c.good && styles.diffChipGood]}
+                    >
+                      <Text style={styles.diffChipText}>{c.text}</Text>
+                    </View>
+                  ))}
+                </View>
+              );
+            })()}
+
           {runResult && (
             <View style={styles.rewardBlock} testID="reward-block">
-              <View style={styles.xpBadge}>
-                <Ionicons name="star" size={14} color="#0F172A" />
-                <Text style={styles.xpBadgeText}>
-                  +{runResult.xpGained} XP
-                </Text>
-              </View>
+              <Reveal delay={1250} trigger={gameOverNonce}>
+                <View style={styles.xpBadge}>
+                  <Ionicons name="star" size={14} color="#0F172A" />
+                  <Text style={styles.xpBadgeText}>
+                    +{runResult.xpGained} XP
+                  </Text>
+                </View>
+              </Reveal>
               {runResult.leveledUp && (
-                <Text style={styles.unlockText}>
-                  Level Up → {runResult.newLevel}!
-                </Text>
+                <Reveal delay={1450} trigger={gameOverNonce}>
+                  <View style={styles.unlockPill}>
+                    <Ionicons name="arrow-up-circle" size={15} color="#0F172A" />
+                    <Text style={styles.unlockText}>
+                      Level Up → {runResult.newLevel}!
+                    </Text>
+                  </View>
+                </Reveal>
               )}
-              {runResult.unlockedSkinsByLevel.map((id) => (
-                <Text key={`l-${id}`} style={styles.unlockText}>
-                  Skin Unlocked: {SKINS[id].name}
-                </Text>
-              ))}
-              {runResult.unlockedSkinsByAchievement.map((id) => (
-                <Text key={`a-${id}`} style={styles.unlockText}>
-                  Skin Unlocked: {SKINS[id].name}
-                </Text>
+              {[
+                ...runResult.unlockedSkinsByLevel,
+                ...runResult.unlockedSkinsByAchievement,
+              ].map((id, i) => (
+                <Reveal
+                  key={`skin-${id}`}
+                  delay={1650 + i * 220}
+                  trigger={gameOverNonce}
+                >
+                  <View style={[styles.unlockPill, styles.unlockPillSkin]}>
+                    <Ionicons name="sparkles" size={15} color="#0F172A" />
+                    <Text style={styles.unlockText}>
+                      Skin Unlocked: {SKINS[id].name}
+                    </Text>
+                  </View>
+                </Reveal>
               ))}
               {runResult.unlockedAchievements
                 .filter(
@@ -1767,45 +1911,69 @@ export default function Game() {
                       (sid) => SKIN_BY_ACHIEVEMENT[sid] === a
                     )
                 )
-                .map((a) => (
-                  <Text key={`ach-${a}`} style={styles.unlockText}>
-                    Achievement: {ACHIEVEMENTS[a].name}
-                  </Text>
+                .map((a, i) => (
+                  <Reveal
+                    key={`ach-${a}`}
+                    delay={1850 + i * 220}
+                    trigger={gameOverNonce}
+                  >
+                    <View style={styles.unlockPill}>
+                      <Ionicons name="trophy" size={15} color="#0F172A" />
+                      <Text style={styles.unlockText}>
+                        Achievement: {ACHIEVEMENTS[a].name}
+                      </Text>
+                    </View>
+                  </Reveal>
                 ))}
-              {runResult.newBestScore && (
-                <Text style={[styles.unlockText, { color: "#B91C1C" }]}>
-                  New Best Score!
-                </Text>
-              )}
             </View>
           )}
 
           <View style={styles.overlayBtnRow}>
-            <TouchableOpacity
-              style={styles.primaryBtn}
+            <GameButton
+              label="RETRY"
+              icon="refresh"
+              variant="primary"
+              size="md"
+              flex
+              pulse={retryPulse}
               onPress={startGame}
               testID="restart-button"
-            >
-              <Ionicons name="refresh" size={18} color="#0F172A" />
-              <Text style={styles.primaryBtnText}>RETRY</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.ghostBtn}
+            />
+            <GameButton
+              label="Share"
+              icon="share-social-outline"
+              variant="secondary"
+              size="md"
+              flex
               onPress={shareScore}
               testID="share-score-button"
-            >
-              <Ionicons name="share-social-outline" size={18} color="#0F172A" />
-              <Text style={styles.ghostBtnText}>Share</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.ghostBtn}
+            />
+            <GameButton
+              label="Home"
+              icon="home-outline"
+              variant="secondary"
+              size="md"
+              flex
               onPress={() => router.replace("/")}
               testID="home-button"
-            >
-              <Ionicons name="home-outline" size={18} color="#0F172A" />
-              <Text style={styles.ghostBtnText}>Home</Text>
-            </TouchableOpacity>
+            />
           </View>
+
+          {runResult &&
+            runResult.unlockedSkinsByLevel.length +
+              runResult.unlockedSkinsByAchievement.length >
+              0 && (
+              <View style={{ marginTop: 10 }}>
+                <GameButton
+                  label="View New Skin"
+                  icon="shirt"
+                  variant="cyan"
+                  size="md"
+                  onPress={() => router.replace("/skins")}
+                  testID="view-skin-button"
+                />
+              </View>
+            )}
         </Overlay>
       )}
     </View>
@@ -2108,6 +2276,8 @@ const styles = StyleSheet.create({
   ghostBtnText: { fontWeight: "800", color: "#0F172A", fontSize: 14 },
   statsRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
     gap: 10,
     marginTop: 16,
     marginBottom: 6,
@@ -2119,8 +2289,11 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    minWidth: 78,
+    minWidth: 72,
     alignItems: "center",
+  },
+  statBoxBest: {
+    backgroundColor: "#FDE047",
   },
   statLabel: {
     fontSize: 10,
@@ -2130,6 +2303,43 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   statValue: { fontSize: 22, fontWeight: "900", color: "#0F172A" },
+  statValueBest: { color: "#0F172A" },
+  diffRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: 6,
+    marginTop: 8,
+  },
+  diffChip: {
+    backgroundColor: "rgba(15,23,42,0.08)",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  diffChipGood: {
+    backgroundColor: "rgba(34,197,94,0.22)",
+  },
+  diffChipText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  unlockPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(255,255,255,0.6)",
+    borderColor: "#0F172A",
+    borderWidth: 2,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    marginTop: 2,
+  },
+  unlockPillSkin: {
+    backgroundColor: "#C4B5FD",
+  },
   linkText: {
     color: "#0F172A",
     fontWeight: "700",
