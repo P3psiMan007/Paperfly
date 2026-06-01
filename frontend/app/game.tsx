@@ -372,8 +372,14 @@ export default function Game() {
             dmEventReceived = true;
             const r = data?.rotation;
             if (r) {
-              const roll = Math.max(-1, Math.min(1, (r.gamma || 0) / 0.7));
-              const pitch = Math.max(-1, Math.min(1, (r.beta || 0) / 0.7));
+              // Do NOT clamp to [-1, 1] here. The calibration offset is
+              // subtracted downstream, and the post-calibration clamp does the
+              // real bounding. Pre-clamping the RAW value eats reachable range
+              // on one side whenever the calibrated neutral isn't dead-centered
+              // — a slight left-lean neutral made the far left unreachable.
+              // A wide safety bound only guards against pathological readings.
+              const roll = Math.max(-3, Math.min(3, (r.gamma || 0) / 0.7));
+              const pitch = Math.max(-3, Math.min(3, (r.beta || 0) / 0.7));
               rawTiltRef.current = { roll, pitch };
             }
           });

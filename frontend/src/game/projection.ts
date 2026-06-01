@@ -13,12 +13,12 @@ export const PLANE_X_RANGE = 220;
 export const PLANE_Y_RANGE = 170;
 
 // How far (px) the plane sprite slides from screen center per unit of tilt.
-// Roll (left/right) and pitch (up/down) were 90 and 70 — vertical felt much
-// weaker than horizontal. Pitch is now 110 so up/down has authority to match
-// (and slightly exceed) left/right. Both render and collision import these so
-// the plane you see is exactly the plane that collides.
-export const ROLL_SCREEN_GAIN = 90;
-export const PITCH_SCREEN_GAIN = 110;
+// Equal on both axes so left/right and up/down feel the same — the real cause
+// of weak/asymmetric steering was a pre-calibration clamp in the sensor
+// handler (since fixed), not the gain. Both render and collision import these
+// so the plane you see is exactly the plane that collides.
+export const ROLL_SCREEN_GAIN = 100;
+export const PITCH_SCREEN_GAIN = 100;
 
 export type PowerupKind = "shield" | "magnet" | "slowmo";
 
