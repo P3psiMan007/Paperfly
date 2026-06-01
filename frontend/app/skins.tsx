@@ -322,8 +322,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   backBtn: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     borderRadius: 14,
     borderWidth: 2,
     borderColor: "#0F172A",

@@ -150,6 +150,7 @@ export default function Index() {
               testID="level-badge"
               accessibilityRole="button"
               accessibilityLabel={`Level ${lvl.level}. Open skins.`}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
               onPress={() => router.push("/skins")}
             >
               <Ionicons name="star" size={12} color="#0F172A" />

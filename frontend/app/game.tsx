@@ -2150,6 +2150,12 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: "900",
     color: "#FDE047",
+    // Dark outline so the yellow score popup stays readable over bright
+    // sky environments (game-ui-design: HUD text needs a contrasting
+    // outline/shadow on varied backgrounds).
+    textShadowColor: "rgba(15,23,42,0.8)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
   powerupPopup: {
     position: "absolute",
