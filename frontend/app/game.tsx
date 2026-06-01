@@ -115,6 +115,10 @@ export default function Game() {
   const [retryPulse, setRetryPulse] = useState(false);
   // Bumped each game over so the confetti + staggered reveals re-fire.
   const [gameOverNonce, setGameOverNonce] = useState(0);
+  // Launch countdown shown after tapping FLY on the Ready overlay: 3 → 2 → 1 →
+  // GO, then the run starts. null = not counting. Gives the player a beat to
+  // re-grip before tilt control goes live (research §0/§5, audit 2.2.1).
+  const [launchCountdown, setLaunchCountdown] = useState<number | null>(null);
   const [boostActive, setBoostActive] = useState(false);
   const [brakeActive, setBrakeActive] = useState(false);
   const [calibrating, setCalibrating] = useState(false);
@@ -278,6 +282,29 @@ export default function Game() {
       clearTimeout(pulseTimer);
     };
   }, [state, runSnapshot]);
+
+  // Drive the launch countdown: tick 3 → 2 → 1 → 0(GO) every 600ms with a
+  // selection haptic each beat, then go live shortly after GO.
+  useEffect(() => {
+    if (launchCountdown === null) return;
+    if (Platform.OS !== "web") {
+      Haptics.selectionAsync().catch(() => {});
+    }
+    if (launchCountdown <= 0) {
+      // "GO" frame — start the run after a short hold.
+      const go = setTimeout(() => {
+        setLaunchCountdown(null);
+        setState("playing");
+        stateRef.current = "playing";
+        lastFrameRef.current = performance.now();
+      }, 380);
+      return () => clearTimeout(go);
+    }
+    const t = setTimeout(() => {
+      setLaunchCountdown((c) => (c === null ? null : c - 1));
+    }, 600);
+    return () => clearTimeout(t);
+  }, [launchCountdown]);
 
   useEffect(() => {
     loadSensitivity().then((s) => (sensRef.current = s));
@@ -508,9 +535,18 @@ export default function Game() {
   };
 
   const startGame = () => {
+    setLaunchCountdown(null);
     resetWorld();
     setState("playing");
     stateRef.current = "playing";
+  };
+
+  // Ready-overlay launch: reset the world, then run a 3-2-1-GO countdown before
+  // going live. The world stays frozen (state isn't "playing" yet) during the
+  // count so nothing moves until GO.
+  const beginLaunch = () => {
+    resetWorld();
+    setLaunchCountdown(3);
   };
 
   const endGame = async () => {
@@ -1717,7 +1753,7 @@ export default function Game() {
         </Overlay>
       )}
 
-      {state === "ready" && !noSensor && (
+      {state === "ready" && !noSensor && launchCountdown === null && (
         <Overlay SW={SW}>
           <Text style={styles.overlayTitle}>Ready?</Text>
           <Text style={styles.overlaySub}>
@@ -1754,7 +1790,7 @@ export default function Game() {
               variant="primary"
               size="md"
               flex
-              onPress={startGame}
+              onPress={beginLaunch}
               testID="ready-start-button"
             />
             <GameButton
@@ -1775,6 +1811,14 @@ export default function Game() {
             <Text style={styles.linkText}>← Back to menu</Text>
           </TouchableOpacity>
         </Overlay>
+      )}
+
+      {launchCountdown !== null && (
+        <View style={[styles.calibrationOverlay, { pointerEvents: "none" }]}>
+          <Text style={styles.launchCount}>
+            {launchCountdown > 0 ? launchCountdown : "GO!"}
+          </Text>
+        </View>
       )}
 
       {calibrating && (
@@ -2410,6 +2454,15 @@ const styles = StyleSheet.create({
     fontSize: 110,
     fontWeight: "900",
     color: "#0F172A",
+  },
+  launchCount: {
+    fontSize: 130,
+    fontWeight: "900",
+    color: "#FDE047",
+    letterSpacing: -2,
+    textShadowColor: "rgba(15,23,42,0.7)",
+    textShadowOffset: { width: 0, height: 4 },
+    textShadowRadius: 10,
   },
   calibrationHint: {
     fontSize: 14,
