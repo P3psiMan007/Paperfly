@@ -4,7 +4,7 @@
 import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { POWERUP_THEME } from "./projection";
+import { POWERUP_THEME, POWERUP_DURATIONS } from "./projection";
 
 export function TiltIndicator({
   tiltX,
@@ -142,6 +142,9 @@ export function PowerupHud({
     color: string;
     icon: string;
     secs?: number;
+    // Fraction of the effect's duration still remaining (0..1) for timed
+    // power-ups; drives the depleting bar. Undefined for the one-shot shield.
+    frac?: number;
   }[] = [];
   if (shieldActive) {
     items.push({
@@ -158,6 +161,10 @@ export function PowerupHud({
       color: POWERUP_THEME.magnet.color,
       icon: POWERUP_THEME.magnet.icon,
       secs: Math.ceil((magnetUntil - now) / 1000),
+      frac: Math.max(
+        0,
+        Math.min(1, (magnetUntil - now) / POWERUP_DURATIONS.magnet)
+      ),
     });
   }
   if (slowmoUntil > now) {
@@ -167,6 +174,10 @@ export function PowerupHud({
       color: POWERUP_THEME.slowmo.color,
       icon: POWERUP_THEME.slowmo.icon,
       secs: Math.ceil((slowmoUntil - now) / 1000),
+      frac: Math.max(
+        0,
+        Math.min(1, (slowmoUntil - now) / POWERUP_DURATIONS.slowmo)
+      ),
     });
   }
   if (items.length === 0) return null;
@@ -181,6 +192,13 @@ export function PowerupHud({
           <Text style={styles.powerupLabel}>{i.label}</Text>
           {typeof i.secs === "number" && (
             <Text style={styles.powerupSecs}>{i.secs}s</Text>
+          )}
+          {typeof i.frac === "number" && (
+            <View style={styles.powerupBarTrack}>
+              <View
+                style={[styles.powerupBarFill, { width: `${i.frac * 100}%` }]}
+              />
+            </View>
           )}
         </View>
       ))}
@@ -256,10 +274,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 4,
     paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingTop: 5,
+    paddingBottom: 7,
     borderWidth: 2,
     borderColor: "#0F172A",
-    borderRadius: 999,
+    borderRadius: 14,
+    overflow: "hidden",
   },
   powerupLabel: {
     fontSize: 10,
@@ -272,5 +292,17 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     color: "#0F172A",
     opacity: 0.7,
+  },
+  powerupBarTrack: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 3,
+    backgroundColor: "rgba(15,23,42,0.15)",
+  },
+  powerupBarFill: {
+    height: 3,
+    backgroundColor: "#0F172A",
   },
 });

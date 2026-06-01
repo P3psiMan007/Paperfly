@@ -27,6 +27,8 @@ import {
   BRAKE_SPEED,
   PLANE_X_RANGE,
   PLANE_Y_RANGE,
+  ROLL_SCREEN_GAIN,
+  PITCH_SCREEN_GAIN,
   WorldObj,
   GameState,
   PowerupKind,
@@ -669,9 +671,12 @@ export default function Game() {
         const targetRoll = Math.max(-1, Math.min(1, rawRoll));
         const targetPitch = Math.max(-1, Math.min(1, rawPitch));
 
-        // Heavier smoothing on pitch (vertical) to kill jitter; roll stays responsive.
+        // Smoothing: higher = snappier (less lag toward the target tilt).
+        // Pitch was 0.07 — so sluggish that quick up/down tilts never reached
+        // their target and vertical felt dead. Now near roll's responsiveness
+        // so up/down has real authority; still a touch softer to tame jitter.
         const SMOOTH_ROLL = 0.18;
-        const SMOOTH_PITCH = 0.07;
+        const SMOOTH_PITCH = 0.15;
         smoothTiltRef.current.roll +=
           (targetRoll - smoothTiltRef.current.roll) * SMOOTH_ROLL;
         smoothTiltRef.current.pitch +=
@@ -832,9 +837,9 @@ export default function Game() {
         const cxNow = SWnow / 2;
         const planeAnchorYNow = SHnow * 0.62;
         const planeScreenXNow =
-          cxNow + smoothTiltRef.current.roll * sensRef.current * 90;
+          cxNow + smoothTiltRef.current.roll * sensRef.current * ROLL_SCREEN_GAIN;
         const planeScreenYNow =
-          planeAnchorYNow + smoothTiltRef.current.pitch * sensRef.current * 70;
+          planeAnchorYNow + smoothTiltRef.current.pitch * sensRef.current * PITCH_SCREEN_GAIN;
 
         const magnetActive = magnetUntilRef.current > now;
 
@@ -1199,9 +1204,9 @@ export default function Game() {
     smoothTiltRef.current.roll * sensRef.current * PLANE_X_RANGE;
   const planeWorldY =
     -smoothTiltRef.current.pitch * sensRef.current * PLANE_Y_RANGE;
-  const planeScreenX = cx + smoothTiltRef.current.roll * sensRef.current * 90;
+  const planeScreenX = cx + smoothTiltRef.current.roll * sensRef.current * ROLL_SCREEN_GAIN;
   const planeScreenY =
-    planeAnchorY + smoothTiltRef.current.pitch * sensRef.current * 70;
+    planeAnchorY + smoothTiltRef.current.pitch * sensRef.current * PITCH_SCREEN_GAIN;
 
   const renderedObjects = objectsRef.current
     .filter((o) => !o.collected && o.z > 5 && o.z < FAR_Z)
@@ -1253,30 +1258,81 @@ export default function Game() {
       }
       if (o.type === "powerup" && o.powerup) {
         const theme = POWERUP_THEME[o.powerup];
-        const bob =
-          Math.sin(performance.now() / 240 + o.id * 0.9) * (size * 0.06);
+        const nowP = performance.now();
+        const bob = Math.sin(nowP / 240 + o.id * 0.9) * (size * 0.06);
+        // Breathing pulse drives the glow strength + a tiny scale so the
+        // pickup reads as a desirable, "alive" collectible rather than a
+        // flat tile (game-feel: collectibles should glow and invite a grab).
+        const pulse = 0.5 + 0.5 * Math.sin(nowP / 300 + o.id * 0.5);
+        const glowSize = size * 1.75;
+        const ringSize = size * 0.8;
         return (
           <View
             key={o.id}
-            style={[
-              styles.powerupBox,
-              {
-                left: sx - size / 2,
-                top: sy - size / 2 + bob,
-                width: size,
-                height: size,
-                borderRadius: size * 0.22,
-                backgroundColor: theme.color,
-                opacity: 0.85 + 0.15 * opacity,
-                pointerEvents: "none",
-              },
-            ]}
+            style={{
+              position: "absolute",
+              left: sx - size / 2,
+              top: sy - size / 2 + bob,
+              width: size,
+              height: size,
+              opacity: 0.85 + 0.15 * opacity,
+              pointerEvents: "none",
+              transform: [{ scale: 1 + 0.05 * pulse }],
+            }}
           >
-            <Ionicons
-              name={theme.icon as any}
-              size={size * 0.55}
-              color="#0F172A"
+            {/* Soft outer glow halo (two stacked layers for falloff). */}
+            <View
+              style={{
+                position: "absolute",
+                left: (size - glowSize) / 2,
+                top: (size - glowSize) / 2,
+                width: glowSize,
+                height: glowSize,
+                borderRadius: glowSize / 2,
+                backgroundColor: theme.color,
+                opacity: 0.16 + 0.14 * pulse,
+              }}
             />
+            <View
+              style={{
+                position: "absolute",
+                left: (size - glowSize * 0.72) / 2,
+                top: (size - glowSize * 0.72) / 2,
+                width: glowSize * 0.72,
+                height: glowSize * 0.72,
+                borderRadius: glowSize,
+                backgroundColor: theme.color,
+                opacity: 0.28,
+              }}
+            />
+            {/* Circular badge: ink outline + inner white ring + dark icon. */}
+            <View
+              style={[
+                styles.powerupBadge,
+                {
+                  width: size,
+                  height: size,
+                  borderRadius: size / 2,
+                  backgroundColor: theme.color,
+                },
+              ]}
+            >
+              <View
+                style={{
+                  position: "absolute",
+                  width: ringSize,
+                  height: ringSize,
+                  borderRadius: ringSize / 2,
+                  borderWidth: Math.max(1.5, size * 0.03),
+                  borderColor: "rgba(255,255,255,0.75)",
+                }}
+              />
+              <Ionicons
+                name={theme.icon as any}
+                size={size * 0.46}
+                color="#0F172A"
+              />
+            </View>
           </View>
         );
       }
@@ -2119,9 +2175,11 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 3 },
     textShadowRadius: 8,
   },
-  powerupBox: {
+  powerupBadge: {
     position: "absolute",
-    borderWidth: 2,
+    left: 0,
+    top: 0,
+    borderWidth: 2.5,
     borderColor: "#0F172A",
     alignItems: "center",
     justifyContent: "center",
