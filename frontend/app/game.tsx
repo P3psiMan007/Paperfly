@@ -190,6 +190,11 @@ export default function Game() {
   // white-flash overlay is visible. Set on env bucket change; the
   // render computes a 0..0.45 opacity from how much time remains.
   const phaseFlashUntilRef = useRef(0);
+  // Crash juice. crashingRef freezes the world for a beat so the screen shake
+  // reads before the game-over overlay arrives (research §1.1/§1.2). The loop
+  // keeps re-rendering while frozen so the shake animates; endGame fires after.
+  const crashingRef = useRef(false);
+  const shakeUntilRef = useRef(0);
   // Coin-collect particle burst. Plain absolutely-positioned Views.
   // Position is screen-space, velocity is px/sec, life is ms. Same
   // dumb-struct shape as popupsRef so the loop owns spawning, ticking,
@@ -482,6 +487,8 @@ export default function Game() {
     comboTierRef.current = 1;
     scoreFlashUntilRef.current = 0;
     phaseFlashUntilRef.current = 0;
+    crashingRef.current = false;
+    shakeUntilRef.current = 0;
     particlesRef.current = [];
     setCombo(0);
     shieldRef.current = false;
@@ -599,7 +606,12 @@ export default function Game() {
       const dt = Math.min(0.05, (now - lastFrameRef.current) / 1000);
       lastFrameRef.current = now;
 
-      if (stateRef.current === "playing") {
+      if (stateRef.current === "playing" && crashingRef.current) {
+        // Crash freeze: world is paused for the shake beat. Keep re-rendering
+        // so the screen shake (computed from shakeUntilRef in render) animates,
+        // but advance nothing else. endGame() fires from the crash handler.
+        setTick((t) => (t + 1) % 1000000);
+      } else if (stateRef.current === "playing") {
         const raw = rawTiltRef.current;
         const cal = calibRef.current;
 
@@ -997,7 +1009,20 @@ export default function Game() {
                   setCrashFlash(true);
                   setTimeout(() => setCrashFlash(false), 280);
                   playSfx("crash", 0.7);
-                  endGame();
+                  if (Platform.OS !== "web") {
+                    Haptics.impactAsync(
+                      Haptics.ImpactFeedbackStyle.Heavy
+                    ).catch(() => {});
+                  }
+                  // Freeze + shake for a beat so the impact lands before the
+                  // game-over overlay reads (research §1.1). endGame fires
+                  // after the shake window.
+                  crashingRef.current = true;
+                  shakeUntilRef.current = now + 320;
+                  setTimeout(() => {
+                    crashingRef.current = false;
+                    endGame();
+                  }, 300);
                   break;
                 }
               }
@@ -1122,6 +1147,13 @@ export default function Game() {
     phaseFlashUntilRef.current - performance.now()
   );
   const phaseFlashOpacity = 0.45 * (phaseFlashRemain / 600);
+  // Crash screen-shake. Amplitude decays with the remaining shake time; the
+  // per-frame random jitter (re-rendered every frame during the crash freeze)
+  // reads as impact. Zero when not shaking, so it's a no-op the rest of the time.
+  const shakeRemain = Math.max(0, shakeUntilRef.current - performance.now());
+  const shakeAmp = shakeRemain > 0 ? (shakeRemain / 320) * 11 : 0;
+  const shakeX = shakeAmp ? (Math.random() - 0.5) * 2 * shakeAmp : 0;
+  const shakeY = shakeAmp ? (Math.random() - 0.5) * 2 * shakeAmp : 0;
   const planeWorldX =
     smoothTiltRef.current.roll * sensRef.current * PLANE_X_RANGE;
   const planeWorldY =
@@ -1342,13 +1374,25 @@ export default function Game() {
 
   const tiltX = smoothTiltRef.current.roll;
   const tiltY = smoothTiltRef.current.pitch;
+  // Show the tilt helper crosshair only to newer players (first few runs of
+  // their career). Veterans have internalized the controls and the always-on
+  // indicator is just HUD noise (audit 2.8.5). Reuses existing crash count so
+  // there's no new persisted state.
+  const showTiltHelper = progress.totalCrashes < 3;
   const speedPct = Math.min(
     1,
     Math.max(0, (speedRef.current - BRAKE_SPEED) / (BOOST_SPEED - BRAKE_SPEED))
   );
 
   return (
-    <View style={styles.root}>
+    <View
+      style={[
+        styles.root,
+        (shakeX !== 0 || shakeY !== 0) && {
+          transform: [{ translateX: shakeX }, { translateY: shakeY }],
+        },
+      ]}
+    >
       <LinearGradient
         colors={env.gradient}
         style={StyleSheet.absoluteFill}
@@ -1554,7 +1598,11 @@ export default function Game() {
             <Text style={styles.hudText}>{score}</Text>
           </View>
 
-          <TiltIndicator tiltX={tiltX} tiltY={tiltY} />
+          {showTiltHelper ? (
+            <TiltIndicator tiltX={tiltX} tiltY={tiltY} />
+          ) : (
+            <View style={{ width: 44 }} />
+          )}
 
           <View style={styles.hudPillCol} testID="speed-indicator">
             <Text style={styles.hudLabel}>SPEED</Text>
