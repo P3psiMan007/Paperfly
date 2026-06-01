@@ -7,17 +7,20 @@ import {
   ScrollView,
   Animated,
   Easing,
+  Platform,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import PaperPlane from "../src/PaperPlane";
 import {
   loadProgress,
   saveProgress,
   Progress,
   levelFromXp,
+  xpForLevel,
 } from "../src/progression";
 import {
   SKIN_LIST,
@@ -115,6 +118,7 @@ export default function Skins() {
                 equipped={progress.equippedSkin === s.id}
                 onEquip={equip}
                 shimmerVal={shimmerVal}
+                playerXp={progress.xp}
               />
             ))}
           </View>
@@ -134,6 +138,7 @@ export default function Skins() {
                 equipped={progress.equippedSkin === s.id}
                 onEquip={equip}
                 shimmerVal={shimmerVal}
+                playerXp={progress.xp}
               />
             ))}
           </View>
@@ -172,21 +177,62 @@ function SkinCard({
   equipped,
   onEquip,
   shimmerVal,
+  playerXp,
 }: {
   skin: Skin;
   owned: boolean;
   equipped: boolean;
   onEquip: (id: Skin["id"]) => void;
   shimmerVal: number;
+  playerXp: number;
 }) {
   const locked = !owned;
   const isRare = skin.tier === "rare";
 
+  // Equip pop: a quick scale 1 → 1.12 → 1 + success haptic so equipping feels
+  // like a reward rather than a silent state flip (audit 2.6.2).
+  const pop = React.useRef(new Animated.Value(0)).current;
   const handlePress = () => {
-    if (owned && !equipped) onEquip(skin.id);
+    if (owned && !equipped) {
+      onEquip(skin.id);
+      if (Platform.OS !== "web") {
+        Haptics.notificationAsync(
+          Haptics.NotificationFeedbackType.Success
+        ).catch(() => {});
+      }
+      pop.setValue(0);
+      Animated.sequence([
+        Animated.timing(pop, {
+          toValue: 1,
+          duration: 130,
+          useNativeDriver: true,
+        }),
+        Animated.spring(pop, {
+          toValue: 0,
+          friction: 4,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
   };
+  const popScale = pop.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 1.12],
+  });
+
+  // For level-locked skins, show concrete XP progress toward the unlock
+  // (audit 2.6.1) — visible progress motivates more than a closed lock.
+  const levelLock = skin.unlock.kind === "level" ? skin.unlock.level : null;
+  const levelTargetXp = levelLock !== null ? xpForLevel(levelLock) : 0;
+  const levelFrac =
+    levelLock !== null && levelTargetXp > 0
+      ? Math.min(1, playerXp / levelTargetXp)
+      : 0;
 
   return (
+    <Animated.View
+      style={[styles.cardWrap, { transform: [{ scale: popScale }] }]}
+    >
     <TouchableOpacity
       activeOpacity={owned ? 0.85 : 1}
       style={[
@@ -227,12 +273,34 @@ function SkinCard({
         {skin.tagline}
       </Text>
       {locked ? (
-        <View style={styles.lockChip}>
-          <Ionicons name="lock-closed" size={11} color="#0F172A" />
-          <Text style={styles.lockText} numberOfLines={1}>
-            {unlockSummary(skin)}
-          </Text>
-        </View>
+        levelLock !== null ? (
+          <View style={styles.lockProgress}>
+            <View style={styles.lockChip}>
+              <Ionicons name="lock-closed" size={11} color="#0F172A" />
+              <Text style={styles.lockText} numberOfLines={1}>
+                LVL {levelLock}
+              </Text>
+            </View>
+            <View style={styles.xpMiniTrack}>
+              <View
+                style={[
+                  styles.xpMiniFill,
+                  { width: `${Math.round(levelFrac * 100)}%` },
+                ]}
+              />
+            </View>
+            <Text style={styles.xpMiniText} numberOfLines={1}>
+              {Math.min(playerXp, levelTargetXp)} / {levelTargetXp} XP
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.lockChip}>
+            <Ionicons name="lock-closed" size={11} color="#0F172A" />
+            <Text style={styles.lockText} numberOfLines={1}>
+              {unlockSummary(skin)}
+            </Text>
+          </View>
+        )
       ) : equipped ? (
         <View style={styles.equippedChip}>
           <Ionicons name="checkmark-circle" size={12} color="#0F172A" />
@@ -244,6 +312,7 @@ function SkinCard({
         </View>
       )}
     </TouchableOpacity>
+    </Animated.View>
   );
 }
 
@@ -313,8 +382,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#A78BFA",
   },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  cardWrap: { width: "48%" },
   card: {
-    width: "48%",
+    width: "100%",
     backgroundColor: "rgba(255,255,255,0.78)",
     borderColor: "#0F172A",
     borderWidth: 2,
@@ -363,6 +433,28 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#0F172A",
     letterSpacing: 0.5,
+  },
+  lockProgress: {
+    alignItems: "center",
+    gap: 4,
+    width: "100%",
+  },
+  xpMiniTrack: {
+    height: 5,
+    width: "85%",
+    backgroundColor: "rgba(15,23,42,0.15)",
+    borderRadius: 3,
+    overflow: "hidden",
+  },
+  xpMiniFill: {
+    height: "100%",
+    backgroundColor: "#0F172A",
+  },
+  xpMiniText: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: "#0F172A",
+    opacity: 0.7,
   },
   equippedChip: {
     flexDirection: "row",
