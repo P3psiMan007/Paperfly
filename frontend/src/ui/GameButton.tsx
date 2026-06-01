@@ -21,13 +21,12 @@ import {
   Pressable,
   ActivityIndicator,
   StyleSheet,
-  Platform,
   Animated,
   StyleProp,
   ViewStyle,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import * as Haptics from "expo-haptics";
+import { hSelection } from "../haptics";
 import { COLORS, RADII, BORDER, SHADOW, FONTS } from "../theme";
 
 export type GameButtonVariant =
@@ -169,9 +168,7 @@ export function GameButton({
           onPressIn={() => {
             if (inert) return;
             setPressed(true);
-            if (Platform.OS !== "web") {
-              Haptics.selectionAsync().catch(() => {});
-            }
+            hSelection();
           }}
           onPressOut={() => setPressed(false)}
           onPress={() => {

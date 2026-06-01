@@ -29,6 +29,11 @@ import {
 } from "../src/progression";
 import { createSaveCode, fetchSaveByCode } from "../src/api";
 import { isSfxEnabled, loadSfxEnabled, setSfxEnabled } from "../src/audio";
+import {
+  isHapticsEnabled,
+  loadHapticsEnabled,
+  setHapticsEnabled,
+} from "../src/haptics";
 import { GameButton } from "../src/ui/GameButton";
 
 export default function Settings() {
@@ -41,12 +46,14 @@ export default function Settings() {
   const [savedCode, setSavedCode] = useState<string | null>(null);
   const [restoreCode, setRestoreCode] = useState("");
   const [soundOn, setSoundOn] = useState(isSfxEnabled());
+  const [hapticsOn, setHapticsOn] = useState(isHapticsEnabled());
 
   useEffect(() => {
     loadSensitivity().then(setSensitivity);
     loadCalibration().then(setCalibration);
     loadProgress().then(setProgress);
     loadSfxEnabled().then(setSoundOn);
+    loadHapticsEnabled().then(setHapticsOn);
   }, []);
 
   const onSensitivityChange = (v: number) => {
@@ -77,6 +84,11 @@ export default function Settings() {
   const toggleSound = async (v: boolean) => {
     setSoundOn(v);
     await setSfxEnabled(v);
+  };
+
+  const toggleHaptics = async (v: boolean) => {
+    setHapticsOn(v);
+    await setHapticsEnabled(v);
   };
 
   const handleBackup = async () => {
@@ -174,6 +186,24 @@ export default function Settings() {
                 testID="sound-toggle"
                 value={soundOn}
                 onValueChange={toggleSound}
+                trackColor={{ false: "rgba(15,23,42,0.2)", true: "#0F172A" }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+          </View>
+
+          <View style={styles.card}>
+            <View style={styles.rowBetween}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardLabel}>HAPTICS</Text>
+                <Text style={styles.cardSub}>
+                  Vibration on taps, combos, near-misses & crashes
+                </Text>
+              </View>
+              <Switch
+                testID="haptics-toggle"
+                value={hapticsOn}
+                onValueChange={toggleHaptics}
                 trackColor={{ false: "rgba(15,23,42,0.2)", true: "#0F172A" }}
                 thumbColor="#FFFFFF"
               />

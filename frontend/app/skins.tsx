@@ -7,13 +7,12 @@ import {
   ScrollView,
   Animated,
   Easing,
-  Platform,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import * as Haptics from "expo-haptics";
+import { hNotify, NotifyType } from "../src/haptics";
 import PaperPlane from "../src/PaperPlane";
 import {
   loadProgress,
@@ -195,11 +194,7 @@ function SkinCard({
   const handlePress = () => {
     if (owned && !equipped) {
       onEquip(skin.id);
-      if (Platform.OS !== "web") {
-        Haptics.notificationAsync(
-          Haptics.NotificationFeedbackType.Success
-        ).catch(() => {});
-      }
+      hNotify(NotifyType.Success);
       pop.setValue(0);
       Animated.sequence([
         Animated.timing(pop, {

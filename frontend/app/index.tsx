@@ -24,6 +24,8 @@ import {
   DEFAULT_PROGRESS,
 } from "../src/progression";
 import { todaySeedString } from "../src/daily";
+import { loadHapticsEnabled } from "../src/haptics";
+import { useReducedMotion } from "../src/ui/useReducedMotion";
 
 const TUTORIAL_KEY = "@mmf_tutorial_seen";
 
@@ -34,6 +36,7 @@ export default function Index() {
   const bobAnim = useMemo(() => new Animated.Value(0), []);
   const shimmer = useMemo(() => new Animated.Value(0), []);
   const [shimmerVal, setShimmerVal] = useState(0);
+  const reducedMotion = useReducedMotion();
 
   const refresh = useCallback(async () => {
     const p = await loadProgress();
@@ -42,9 +45,16 @@ export default function Index() {
 
   useEffect(() => {
     refresh();
+    loadHapticsEnabled();
     AsyncStorage.getItem(TUTORIAL_KEY).then((v) => {
       if (v !== "1") setShowTutorial(true);
     });
+    // Respect Reduce Motion: keep the plane and its shimmer static.
+    if (reducedMotion) {
+      bobAnim.setValue(0);
+      setShimmerVal(0);
+      return;
+    }
     const useNative = Platform.OS !== "web";
     const bobLoop = Animated.loop(
       Animated.sequence([
@@ -78,7 +88,7 @@ export default function Index() {
       shimmerLoop.stop();
       shimmer.removeListener(id);
     };
-  }, [refresh, bobAnim, shimmer]);
+  }, [refresh, bobAnim, shimmer, reducedMotion]);
 
   useFocusEffect(
     useCallback(() => {

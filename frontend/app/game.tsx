@@ -63,9 +63,11 @@ import {
 import { SKINS, ACHIEVEMENTS, AchievementId, SkinId } from "../src/skins";
 import { mulberry32, todaySeed, todaySeedString } from "../src/daily";
 import { playSfx, preloadSounds, loadSfxEnabled } from "../src/audio";
+import { isHapticsEnabled as hapticsOn, loadHapticsEnabled } from "../src/haptics";
 import { GameButton } from "../src/ui/GameButton";
 import { Confetti } from "../src/ui/Confetti";
 import { Reveal } from "../src/ui/Reveal";
+import { useReducedMotion } from "../src/ui/useReducedMotion";
 
 // Map of which skins unlock from which achievement (kept here to avoid circular imports)
 // Which achievement unlocks which skin. The reverse map (skin -> achievement)
@@ -119,6 +121,7 @@ export default function Game() {
   // GO, then the run starts. null = not counting. Gives the player a beat to
   // re-grip before tilt control goes live (research §0/§5, audit 2.2.1).
   const [launchCountdown, setLaunchCountdown] = useState<number | null>(null);
+  const reducedMotion = useReducedMotion();
   const [boostActive, setBoostActive] = useState(false);
   const [brakeActive, setBrakeActive] = useState(false);
   const [calibrating, setCalibrating] = useState(false);
@@ -263,7 +266,7 @@ export default function Game() {
       if (bucket > lastBucket && val < target && val > 0) {
         lastBucket = bucket;
         playSfx("ring", 0.22);
-        if (Platform.OS !== "web") {
+        if (Platform.OS !== "web" && hapticsOn()) {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
             () => {}
           );
@@ -287,7 +290,7 @@ export default function Game() {
   // selection haptic each beat, then go live shortly after GO.
   useEffect(() => {
     if (launchCountdown === null) return;
-    if (Platform.OS !== "web") {
+    if (Platform.OS !== "web" && hapticsOn()) {
       Haptics.selectionAsync().catch(() => {});
     }
     if (launchCountdown <= 0) {
@@ -316,6 +319,7 @@ export default function Game() {
     loadSfxEnabled().then(() => {
       preloadSounds().catch(() => {});
     });
+    loadHapticsEnabled();
   }, []);
 
   // Sensor subscription — prefer DeviceMotion (gravity-compensated, more
@@ -469,7 +473,7 @@ export default function Game() {
         calibRef.current = newCal;
         saveCalibration(newCal);
         setCalibrating(false);
-        if (Platform.OS !== "web") {
+        if (Platform.OS !== "web" && hapticsOn()) {
           Haptics.notificationAsync(
             Haptics.NotificationFeedbackType.Success
           ).catch(() => {});
@@ -552,7 +556,7 @@ export default function Game() {
   const endGame = async () => {
     setState("gameover");
     stateRef.current = "gameover";
-    if (Platform.OS !== "web") {
+    if (Platform.OS !== "web" && hapticsOn()) {
       Haptics.notificationAsync(
         Haptics.NotificationFeedbackType.Error
       ).catch(() => {});
@@ -716,7 +720,7 @@ export default function Game() {
             label: nextEnv.name.toUpperCase(),
             kind: "phase",
           });
-          if (Platform.OS !== "web") {
+          if (Platform.OS !== "web" && hapticsOn()) {
             Haptics.notificationAsync(
               Haptics.NotificationFeedbackType.Warning
             ).catch(() => {});
@@ -955,7 +959,7 @@ export default function Game() {
                     t: now,
                     label: `COMBO ×${mult}!`,
                   });
-                  if (Platform.OS !== "web") {
+                  if (Platform.OS !== "web" && hapticsOn()) {
                     Haptics.notificationAsync(
                       Haptics.NotificationFeedbackType.Success
                     ).catch(() => {});
@@ -994,7 +998,7 @@ export default function Game() {
                 }
                 setCombo(comboRef.current);
                 playSfx("ring", 0.5);
-                if (Platform.OS !== "web") {
+                if (Platform.OS !== "web" && hapticsOn()) {
                   Haptics.impactAsync(
                     Haptics.ImpactFeedbackStyle.Light
                   ).catch(() => {});
@@ -1019,7 +1023,7 @@ export default function Game() {
                   label: POWERUP_THEME[kind].label,
                 });
                 playSfx("boost", 0.5);
-                if (Platform.OS !== "web") {
+                if (Platform.OS !== "web" && hapticsOn()) {
                   Haptics.notificationAsync(
                     Haptics.NotificationFeedbackType.Success
                   ).catch(() => {});
@@ -1032,7 +1036,7 @@ export default function Game() {
                   o.collected = true; // remove the obstacle that broke the shield
                   setCrashFlash(true);
                   setTimeout(() => setCrashFlash(false), 200);
-                  if (Platform.OS !== "web") {
+                  if (Platform.OS !== "web" && hapticsOn()) {
                     Haptics.impactAsync(
                       Haptics.ImpactFeedbackStyle.Heavy
                     ).catch(() => {});
@@ -1045,7 +1049,7 @@ export default function Game() {
                   setCrashFlash(true);
                   setTimeout(() => setCrashFlash(false), 280);
                   playSfx("crash", 0.7);
-                  if (Platform.OS !== "web") {
+                  if (Platform.OS !== "web" && hapticsOn()) {
                     Haptics.impactAsync(
                       Haptics.ImpactFeedbackStyle.Heavy
                     ).catch(() => {});
@@ -1088,7 +1092,7 @@ export default function Game() {
                   t: now,
                   label: "NEAR MISS +25",
                 });
-                if (Platform.OS !== "web") {
+                if (Platform.OS !== "web" && hapticsOn()) {
                   Haptics.impactAsync(
                     Haptics.ImpactFeedbackStyle.Light
                   ).catch(() => {});
@@ -1187,7 +1191,8 @@ export default function Game() {
   // per-frame random jitter (re-rendered every frame during the crash freeze)
   // reads as impact. Zero when not shaking, so it's a no-op the rest of the time.
   const shakeRemain = Math.max(0, shakeUntilRef.current - performance.now());
-  const shakeAmp = shakeRemain > 0 ? (shakeRemain / 320) * 11 : 0;
+  const shakeAmp =
+    shakeRemain > 0 && !reducedMotion ? (shakeRemain / 320) * 11 : 0;
   const shakeX = shakeAmp ? (Math.random() - 0.5) * 2 * shakeAmp : 0;
   const shakeY = shakeAmp ? (Math.random() - 0.5) * 2 * shakeAmp : 0;
   const planeWorldX =
@@ -1868,7 +1873,7 @@ export default function Game() {
 
       {state === "gameover" && (
         <Overlay SW={SW}>
-          {runResult?.newBestScore && (
+          {runResult?.newBestScore && !reducedMotion && (
             <Confetti width={SW - 60} trigger={gameOverNonce} />
           )}
           {isDaily && (
