@@ -62,6 +62,7 @@ import {
 import { SKINS, ACHIEVEMENTS, AchievementId, SkinId } from "../src/skins";
 import { mulberry32, todaySeed, todaySeedString } from "../src/daily";
 import { playSfx, preloadSounds, loadSfxEnabled } from "../src/audio";
+import { GameButton } from "../src/ui/GameButton";
 
 // Map of which skins unlock from which achievement (kept here to avoid circular imports)
 // Which achievement unlocks which skin. The reverse map (skin -> achievement)
@@ -1608,22 +1609,24 @@ export default function Game() {
             </Text>
           </View>
           <View style={styles.overlayBtnRow}>
-            <TouchableOpacity
-              style={styles.primaryBtn}
+            <GameButton
+              label="FLY"
+              icon="play"
+              variant="primary"
+              size="md"
+              flex
               onPress={startGame}
               testID="ready-start-button"
-            >
-              <Ionicons name="play" size={18} color="#0F172A" />
-              <Text style={styles.primaryBtnText}>FLY</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.ghostBtn}
+            />
+            <GameButton
+              label="Calibrate"
+              icon="compass-outline"
+              variant="secondary"
+              size="md"
+              flex
               onPress={doCalibrate}
               testID="calibrate-button"
-            >
-              <Ionicons name="compass-outline" size={18} color="#0F172A" />
-              <Text style={styles.ghostBtnText}>Calibrate</Text>
-            </TouchableOpacity>
+            />
           </View>
           <TouchableOpacity
             onPress={() => router.back()}
@@ -1654,26 +1657,28 @@ export default function Game() {
         <Overlay SW={SW}>
           <Text style={styles.overlayTitle}>Paused</Text>
           <View style={styles.overlayBtnRow}>
-            <TouchableOpacity
-              style={styles.primaryBtn}
+            <GameButton
+              label="RESUME"
+              icon="play"
+              variant="primary"
+              size="md"
+              flex
               onPress={() => {
                 setState("playing");
                 stateRef.current = "playing";
                 lastFrameRef.current = performance.now();
               }}
               testID="resume-button"
-            >
-              <Ionicons name="play" size={18} color="#0F172A" />
-              <Text style={styles.primaryBtnText}>RESUME</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.ghostBtn}
+            />
+            <GameButton
+              label="Quit"
+              icon="home-outline"
+              variant="secondary"
+              size="md"
+              flex
               onPress={() => router.replace("/")}
               testID="quit-button"
-            >
-              <Ionicons name="home-outline" size={18} color="#0F172A" />
-              <Text style={styles.ghostBtnText}>Quit</Text>
-            </TouchableOpacity>
+            />
           </View>
         </Overlay>
       )}

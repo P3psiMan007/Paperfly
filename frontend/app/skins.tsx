@@ -92,6 +92,8 @@ export default function Skins() {
             onPress={() => router.back()}
             style={styles.backBtn}
             testID="skins-back"
+            accessibilityRole="button"
+            accessibilityLabel="Back"
           >
             <Ionicons name="chevron-back" size={22} color="#0F172A" />
           </TouchableOpacity>
@@ -194,6 +196,15 @@ function SkinCard({
       ]}
       onPress={handlePress}
       testID={`skin-card-${skin.id}`}
+      accessibilityRole="button"
+      accessibilityLabel={
+        locked
+          ? `${skin.name}, locked. ${unlockSummary(skin)}`
+          : equipped
+          ? `${skin.name}, equipped`
+          : `${skin.name}, tap to equip`
+      }
+      accessibilityState={{ disabled: locked, selected: equipped }}
     >
       {isRare && (
         <View style={styles.rareBadge}>

@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   Pressable,
   Animated,
   Easing,
@@ -17,6 +16,7 @@ import { Ionicons } from "@expo/vector-icons";
 import PaperPlane from "../src/PaperPlane";
 import Cloud from "../src/Cloud";
 import TutorialOverlay from "../src/Tutorial";
+import { GameButton } from "../src/ui/GameButton";
 import {
   loadProgress,
   Progress,
@@ -135,10 +135,16 @@ export default function Index() {
               <Text style={styles.title}>Paper</Text>
               <Text style={styles.titleAccent}>Fly</Text>
             </View>
-            <View style={styles.levelBadge} testID="level-badge">
+            <Pressable
+              style={styles.levelBadge}
+              testID="level-badge"
+              accessibilityRole="button"
+              accessibilityLabel={`Level ${lvl.level}. Open skins.`}
+              onPress={() => router.push("/skins")}
+            >
               <Ionicons name="star" size={12} color="#0F172A" />
               <Text style={styles.levelBadgeText}>LVL {lvl.level}</Text>
-            </View>
+            </Pressable>
           </View>
 
           <Animated.View
@@ -182,66 +188,84 @@ export default function Index() {
           </View>
 
           <View style={styles.buttons}>
-            <TouchableOpacity
-              style={styles.primaryBtn}
-              activeOpacity={0.85}
+            <GameButton
+              label="START GAME"
+              icon="play"
+              variant="primary"
+              size="lg"
               onPress={() => router.push("/game")}
               testID="start-game-button"
-            >
-              <Ionicons name="play" size={22} color="#0F172A" />
-              <Text style={styles.primaryBtnText}>START GAME</Text>
-            </TouchableOpacity>
+            />
 
-            <TouchableOpacity
-              style={styles.dailyBtn}
-              activeOpacity={0.85}
+            <GameButton
+              label={
+                dailyTodayBest > 0
+                  ? `DAILY CHALLENGE · ${dailyTodayBest}`
+                  : "DAILY CHALLENGE"
+              }
+              accessibilityLabel={
+                dailyTodayBest > 0
+                  ? `Daily challenge. Today's best ${dailyTodayBest}.`
+                  : "Daily challenge"
+              }
+              icon="calendar"
+              variant="cyan"
+              size="md"
               onPress={() =>
                 router.push({ pathname: "/game", params: { daily: "1" } })
               }
               testID="daily-button"
-            >
-              <Ionicons name="calendar" size={18} color="#0F172A" />
-              <Text style={styles.dailyBtnText}>DAILY CHALLENGE</Text>
-              {dailyTodayBest > 0 && (
-                <View style={styles.dailyChip}>
-                  <Text style={styles.dailyChipText}>{dailyTodayBest}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
+            />
 
             <View style={styles.row}>
-              <Pressable
-                style={styles.secondaryBtn}
+              <GameButton
+                label="Skins"
+                icon="shirt-outline"
+                variant="secondary"
+                size="sm"
+                flex
                 onPress={() => router.push("/skins")}
                 testID="skins-button"
-              >
-                <Ionicons name="shirt-outline" size={18} color="#0F172A" />
-                <Text style={styles.secondaryBtnText}>Skins</Text>
-              </Pressable>
-              <Pressable
-                style={styles.secondaryBtn}
+              />
+              <GameButton
+                label="Settings"
+                icon="settings-outline"
+                variant="secondary"
+                size="sm"
+                flex
                 onPress={() => router.push("/settings")}
                 testID="settings-button"
-              >
-                <Ionicons name="settings-outline" size={18} color="#0F172A" />
-                <Text style={styles.secondaryBtnText}>Settings</Text>
-              </Pressable>
-              <Pressable
-                style={styles.secondaryBtn}
+              />
+              <GameButton
+                label="Calibrate"
+                icon="compass-outline"
+                variant="secondary"
+                size="sm"
+                flex
                 onPress={() =>
                   router.push({ pathname: "/game", params: { calibrate: "1" } })
                 }
                 testID="calibrate-shortcut"
-              >
-                <Ionicons name="compass-outline" size={18} color="#0F172A" />
-                <Text style={styles.secondaryBtnText}>Calib.</Text>
-              </Pressable>
+              />
             </View>
           </View>
 
-          <Text style={styles.footnote}>
-            Hold screen to boost · Swipe down to brake
-          </Text>
+          <View style={styles.controlsRow}>
+            <View style={styles.controlHint}>
+              <Ionicons name="phone-portrait-outline" size={15} color="#0F172A" />
+              <Text style={styles.controlHintText}>Tilt to steer</Text>
+            </View>
+            <View style={styles.controlDot} />
+            <View style={styles.controlHint}>
+              <Ionicons name="finger-print-outline" size={15} color="#0F172A" />
+              <Text style={styles.controlHintText}>Hold to boost</Text>
+            </View>
+            <View style={styles.controlDot} />
+            <View style={styles.controlHint}>
+              <Ionicons name="chevron-down" size={15} color="#0F172A" />
+              <Text style={styles.controlHintText}>Swipe to brake</Text>
+            </View>
+          </View>
         </View>
 
         {showTutorial && <TutorialOverlay onDone={dismissTutorial} />}
@@ -350,71 +374,31 @@ const styles = StyleSheet.create({
     backgroundColor: "#0F172A",
   },
   buttons: { gap: 10 },
-  primaryBtn: {
-    backgroundColor: "#FDE047",
-    borderColor: "#0F172A",
-    borderWidth: 2,
-    borderRadius: 22,
-    paddingVertical: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-  },
-  primaryBtnText: {
-    color: "#0F172A",
-    fontWeight: "900",
-    fontSize: 18,
-    letterSpacing: 1,
-  },
-  dailyBtn: {
-    backgroundColor: "#A5F3FC",
-    borderColor: "#0F172A",
-    borderWidth: 2,
-    borderRadius: 18,
-    paddingVertical: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  dailyBtnText: {
-    color: "#0F172A",
-    fontWeight: "900",
-    fontSize: 14,
-    letterSpacing: 1.2,
-  },
-  dailyChip: {
-    backgroundColor: "#0F172A",
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 999,
-  },
-  dailyChipText: {
-    color: "#FFFFFF",
-    fontSize: 11,
-    fontWeight: "900",
-  },
   row: { flexDirection: "row", gap: 8 },
-  secondaryBtn: {
-    flex: 1,
-    backgroundColor: "rgba(255,255,255,0.78)",
-    borderColor: "#0F172A",
-    borderWidth: 2,
-    borderRadius: 16,
-    paddingVertical: 12,
+  controlsRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 6,
   },
-  secondaryBtnText: { color: "#0F172A", fontWeight: "800", fontSize: 13 },
-  footnote: {
-    textAlign: "center",
+  controlHint: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  controlHintText: {
     color: "#0F172A",
-    opacity: 0.55,
-    fontSize: 12,
-    fontWeight: "600",
-    marginTop: 4,
+    opacity: 0.8,
+    fontSize: 12.5,
+    fontWeight: "800",
+    letterSpacing: 0.2,
+  },
+  controlDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(15,23,42,0.35)",
   },
 });

@@ -29,6 +29,7 @@ import {
 } from "../src/progression";
 import { createSaveCode, fetchSaveByCode } from "../src/api";
 import { isSfxEnabled, loadSfxEnabled, setSfxEnabled } from "../src/audio";
+import { GameButton } from "../src/ui/GameButton";
 
 export default function Settings() {
   const router = useRouter();
@@ -116,6 +117,8 @@ export default function Settings() {
             onPress={() => router.back()}
             style={styles.backBtn}
             testID="settings-back"
+            accessibilityRole="button"
+            accessibilityLabel="Back"
           >
             <Ionicons name="chevron-back" size={22} color="#0F172A" />
           </TouchableOpacity>
@@ -192,16 +195,17 @@ export default function Settings() {
                 Tip: Recalibrate any time the plane drifts on its own.
               </Text>
             </View>
-            <TouchableOpacity
-              style={styles.actionBtn}
+            <GameButton
+              label="Recalibrate Now"
+              icon="compass-outline"
+              variant="secondary"
+              size="md"
+              style={{ marginTop: 6 }}
               onPress={() =>
                 router.push({ pathname: "/game", params: { calibrate: "1" } })
               }
               testID="recalibrate-button"
-            >
-              <Ionicons name="compass-outline" size={18} color="#0F172A" />
-              <Text style={styles.actionBtnText}>Recalibrate Now</Text>
-            </TouchableOpacity>
+            />
           </View>
 
           <View style={styles.card}>
@@ -216,39 +220,37 @@ export default function Settings() {
                   {savedCode}
                 </Text>
                 <View style={{ flexDirection: "row", gap: 8 }}>
-                  <TouchableOpacity
-                    style={styles.actionBtnSmall}
+                  <GameButton
+                    label="Share"
+                    icon="share-outline"
+                    variant="secondary"
+                    size="sm"
+                    flex
                     onPress={shareCode}
                     testID="share-code"
-                  >
-                    <Ionicons
-                      name="share-outline"
-                      size={16}
-                      color="#0F172A"
-                    />
-                    <Text style={styles.actionBtnText}>Share</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.actionBtnSmall}
+                  />
+                  <GameButton
+                    label="Close"
+                    icon="close"
+                    variant="secondary"
+                    size="sm"
+                    flex
                     onPress={() => setSavedCode(null)}
-                  >
-                    <Ionicons name="close" size={16} color="#0F172A" />
-                    <Text style={styles.actionBtnText}>Close</Text>
-                  </TouchableOpacity>
+                  />
                 </View>
               </View>
             ) : (
-              <TouchableOpacity
-                style={styles.actionBtn}
+              <GameButton
+                label="Generate Save Code"
+                loadingLabel="Backing up…"
+                loading={savingCloud}
+                icon="cloud-upload-outline"
+                variant="secondary"
+                size="md"
+                style={{ marginTop: 6 }}
                 onPress={handleBackup}
-                disabled={savingCloud}
                 testID="backup-button"
-              >
-                <Ionicons name="cloud-upload-outline" size={18} color="#0F172A" />
-                <Text style={styles.actionBtnText}>
-                  {savingCloud ? "Backing up…" : "Generate Save Code"}
-                </Text>
-              </TouchableOpacity>
+              />
             )}
 
             <Text style={[styles.cardSub, { marginTop: 12 }]}>
@@ -264,30 +266,32 @@ export default function Settings() {
               autoCapitalize="characters"
               maxLength={9}
             />
-            <TouchableOpacity
-              style={styles.actionBtn}
+            <GameButton
+              label="Restore Progress"
+              loadingLabel="Restoring…"
+              loading={restoring}
+              disabled={!restoreCode.trim()}
+              icon="cloud-download-outline"
+              variant="secondary"
+              size="md"
+              style={{ marginTop: 6 }}
               onPress={handleRestore}
-              disabled={restoring || !restoreCode.trim()}
               testID="restore-button"
-            >
-              <Ionicons name="cloud-download-outline" size={18} color="#0F172A" />
-              <Text style={styles.actionBtnText}>
-                {restoring ? "Restoring…" : "Restore Progress"}
-              </Text>
-            </TouchableOpacity>
+            />
           </View>
 
           <View style={styles.card}>
             <Text style={styles.cardLabel}>HIGH SCORE</Text>
             <Text style={styles.cardValue}>{progress.bestScore}</Text>
-            <TouchableOpacity
-              style={styles.actionBtn}
+            <GameButton
+              label="Reset High Score"
+              icon="refresh"
+              variant="danger"
+              size="md"
+              style={{ marginTop: 6 }}
               onPress={resetHighScore}
               testID="reset-highscore"
-            >
-              <Ionicons name="refresh" size={18} color="#0F172A" />
-              <Text style={styles.actionBtnText}>Reset High Score</Text>
-            </TouchableOpacity>
+            />
           </View>
 
           <View style={styles.card}>
