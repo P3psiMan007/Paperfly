@@ -132,8 +132,8 @@ export default function Index() {
               <Text style={styles.eyebrow} testID="title-eyebrow">
                 TILT TO FLY
               </Text>
-              <Text style={styles.title}>Mr. Maybe</Text>
-              <Text style={styles.titleAccent}>Flight</Text>
+              <Text style={styles.title}>Paper</Text>
+              <Text style={styles.titleAccent}>Fly</Text>
             </View>
             <View style={styles.levelBadge} testID="level-badge">
               <Ionicons name="star" size={12} color="#0F172A" />

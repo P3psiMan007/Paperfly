@@ -1,4 +1,4 @@
-"""Mr. Maybe Flight backend.
+"""Paper Fly backend.
 
 Surface area kept deliberately small post-Stripe-removal:
   POST /api/save           — store a progress blob, return a short code
@@ -104,7 +104,7 @@ async def cap_body_size(request: Request, call_next):
 # ---------------- Routes ----------------
 @api.get("/")
 async def root():
-    return {"message": "Mr. Maybe Flight backend", "ok": True}
+    return {"message": "Paper Fly backend", "ok": True}
 
 
 @api.post("/status", response_model=StatusCheck)

@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "Mr. Maybe Flight",
-    "slug": "mr-maybe-flight",
+    "name": "Paper Fly",
+    "slug": "paper-fly",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "mrmaybeflight",
+    "scheme": "paperfly",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "primaryColor": "#FDE047",

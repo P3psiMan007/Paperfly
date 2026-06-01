@@ -81,7 +81,7 @@ export default function Settings() {
     if (!savedCode) return;
     try {
       await Share.share({
-        message: `My Mr. Maybe Flight save code: ${savedCode}`,
+        message: `My Paper Fly save code: ${savedCode}`,
       });
     } catch {}
   };

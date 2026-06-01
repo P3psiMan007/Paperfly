@@ -493,7 +493,7 @@ export default function Game() {
     const finalScore = Math.floor(scoreRef.current);
     const tag = isDaily
       ? `Daily Challenge ${todaySeedString()}`
-      : "Mr. Maybe Flight";
+      : "Paper Fly";
     const message = `${tag} — I scored ${finalScore} points and collected ${collectedRingsRef.current} rings! Can you beat me? ✈️`;
     try {
       await Share.share({ message });
@@ -1546,7 +1546,7 @@ export default function Game() {
           <Text style={styles.overlayEyebrow}>NO TILT SENSOR</Text>
           <Text style={styles.overlayTitle}>Open on your phone</Text>
           <Text style={styles.overlaySub}>
-            Mr. Maybe Flight uses your phone&apos;s tilt sensor to steer. We
+            Paper Fly uses your phone&apos;s tilt sensor to steer. We
             can&apos;t detect one here — try opening this on an iOS or
             Android device.
           </Text>

@@ -1,4 +1,4 @@
-# Mr. Maybe Flight — Product Requirements Document
+# Paper Fly — Product Requirements Document
 
 ## Overview
 A mobile flying game prototype built with Expo (React Native) where the player tilts their phone to steer a paper plane through an endless 2.5D sky filled with collectible rings and obstacles.

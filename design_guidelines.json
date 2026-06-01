@@ -2,7 +2,7 @@
   "theme": "Light",
   "archetype": "3 (Pastel & Soft) + Neo-Brutalist Game UI Twist",
   "domain": "Mobile Game",
-  "instructions_to_main_agent": "Implement a 2.5D flying game 'Mr. Maybe Flight' using React Native (Expo) and canvas-style rendering or SVGs. Follow the high-contrast Neo-brutalist UI style for menus paired with a dreamy, soft pastel game world. Prioritize responsive tilt controls using Expo sensors (gyroscope) and smooth spring animations for UI.",
+  "instructions_to_main_agent": "Implement a 2.5D flying game 'Paper Fly' using React Native (Expo) and canvas-style rendering or SVGs. Follow the high-contrast Neo-brutalist UI style for menus paired with a dreamy, soft pastel game world. Prioritize responsive tilt controls using Expo sensors (gyroscope) and smooth spring animations for UI.",
   "colors": {
     "background_gradient": ["#FFDEE9", "#B5FFFC"],
     "primary": "#FFFFFF",

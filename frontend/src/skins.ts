@@ -1,4 +1,4 @@
-// Skins catalog for Mr. Maybe Flight.
+// Skins catalog for Paper Fly.
 // All skins are free — they're earned by XP levels or one-run achievements.
 // The 'rare' tier just means a harder unlock; visually they have animated
 // flair (shimmer / flame / galaxy) to feel like a real reward.
