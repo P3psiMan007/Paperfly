@@ -27,16 +27,23 @@ import {
   Skin,
   unlockSummary,
   ACHIEVEMENTS,
+  RARITY_ORDER,
+  RARITY_LABEL,
+  RARITY_COLOR,
 } from "../src/skins";
+import { getCheckoutStatus, getOwnedSkins } from "../src/api";
 import {
-  createCheckoutSession,
-  getCheckoutStatus,
-  getOwnedSkins,
-} from "../src/api";
+  initPurchases,
+  endPurchases,
+  purchaseSkin,
+} from "../src/iap";
 
 export default function Skins() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ session_id?: string; cancelled?: string }>();
+  const params = useLocalSearchParams<{
+    session_id?: string;
+    cancelled?: string;
+  }>();
   const [progress, setProgress] = useState<Progress | null>(null);
   const shimmer = useMemo(() => new Animated.Value(0), []);
   const [shimmerVal, setShimmerVal] = useState(0);
@@ -46,7 +53,6 @@ export default function Skins() {
 
   const refresh = useCallback(async () => {
     const p = await loadProgress();
-    // Sync owned premium skins from backend
     try {
       const owned = await getOwnedSkins();
       if (owned.length) {
@@ -70,6 +76,15 @@ export default function Skins() {
 
   useEffect(() => {
     refresh();
+    initPurchases({
+      onSkinUnlock: async (skinId) => {
+        await refresh();
+        Alert.alert("Purchase complete!", `Unlocked ${skinId} skin.`);
+      },
+      onKeysGranted: async () => {
+        // ignored here; handled in crates screen
+      },
+    });
     const id = shimmer.addListener(({ value }) => setShimmerVal(value));
     const loop = Animated.loop(
       Animated.timing(shimmer, {
@@ -83,10 +98,10 @@ export default function Skins() {
     return () => {
       loop.stop();
       shimmer.removeListener(id);
+      endPurchases();
     };
   }, [refresh, shimmer]);
 
-  // Handle return from Stripe checkout
   useEffect(() => {
     if (params.session_id) {
       pollPaymentStatus(params.session_id as string);
@@ -147,16 +162,16 @@ export default function Skins() {
   const buyPremium = async (skin: Skin) => {
     setPurchasing(skin.id);
     try {
-      const origin =
-        (process.env.EXPO_PUBLIC_BACKEND_URL || "").replace(/\/$/, "") ||
-        "https://example.com";
-      const { url } = await createCheckoutSession(skin.id, origin);
-      // Open Stripe Checkout in an in-app browser; on success we land back at /skins?session_id=...
-      const result = await WebBrowser.openBrowserAsync(url);
-      // After browser closes, refresh state (in case we already handle redirect via deep link)
-      if (result.type === "cancel" || result.type === "dismiss") {
-        // Best-effort: poll once via getOwnedSkins
+      const outcome = await purchaseSkin(skin.id);
+      if (outcome.kind === "iap_pending") {
+        // native flow opened; listener will refresh state when payment succeeds
+      } else if (outcome.kind === "web_redirect") {
+        await WebBrowser.openBrowserAsync(outcome.url).catch(() => {});
         await refresh();
+      } else if (outcome.kind === "unsupported") {
+        Alert.alert("Native build required", outcome.message);
+      } else if (outcome.kind === "error") {
+        Alert.alert("Checkout failed", outcome.message);
       }
     } catch (e: any) {
       Alert.alert("Checkout failed", e?.message || "Please try again");
@@ -174,6 +189,7 @@ export default function Skins() {
   }
 
   const level = levelFromXp(progress.xp);
+  const ownedCount = progress.ownedSkins.length;
 
   return (
     <LinearGradient
@@ -200,45 +216,73 @@ export default function Skins() {
           <View style={styles.pollBanner} testID="payment-polling">
             <ActivityIndicator size="small" color="#0F172A" />
             <Text style={styles.pollText}>
-              Confirming your payment with Stripe…
+              Confirming your payment…
             </Text>
           </View>
         )}
 
         <ScrollView contentContainerStyle={styles.content}>
-          <Text style={styles.sectionLabel}>FREE · EARN BY PLAYING</Text>
-          <View style={styles.grid}>
-            {SKIN_LIST.filter((s) => s.type === "free").map((s) => (
-              <SkinCard
-                key={s.id}
-                skin={s}
-                owned={progress.ownedSkins.includes(s.id)}
-                equipped={progress.equippedSkin === s.id}
-                onEquip={equip}
-                onBuy={buyPremium}
-                shimmerVal={shimmerVal}
-                purchasing={purchasing === s.id}
-              />
-            ))}
+          {/* Collection summary + crate CTA */}
+          <View style={styles.summaryRow}>
+            <View style={styles.summaryBox}>
+              <Text style={styles.summaryLabel}>COLLECTION</Text>
+              <Text style={styles.summaryValue}>
+                {ownedCount} / {SKIN_LIST.length}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.cratesCta}
+              onPress={() => router.push("/crates")}
+              testID="open-crates-from-skins"
+            >
+              <Ionicons name="cube" size={20} color="#FDE047" />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cratesCtaTitle}>OPEN CRATES</Text>
+                <Text style={styles.cratesCtaSub}>
+                  {progress.crates} crate{progress.crates !== 1 ? "s" : ""} · {progress.keys} key{progress.keys !== 1 ? "s" : ""}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#FDE047" />
+            </TouchableOpacity>
           </View>
 
-          <Text style={[styles.sectionLabel, { marginTop: 22 }]}>
-            PREMIUM · $2.99 EACH
-          </Text>
-          <View style={styles.grid}>
-            {SKIN_LIST.filter((s) => s.type === "premium").map((s) => (
-              <SkinCard
-                key={s.id}
-                skin={s}
-                owned={progress.ownedSkins.includes(s.id)}
-                equipped={progress.equippedSkin === s.id}
-                onEquip={equip}
-                onBuy={buyPremium}
-                shimmerVal={shimmerVal}
-                purchasing={purchasing === s.id}
-              />
-            ))}
-          </View>
+          {RARITY_ORDER.map((rarity) => {
+            const list = SKIN_LIST.filter((s) => s.rarity === rarity);
+            if (!list.length) return null;
+            return (
+              <View key={rarity}>
+                <View style={styles.sectionHeader}>
+                  <View
+                    style={[
+                      styles.rarityDot,
+                      { backgroundColor: RARITY_COLOR[rarity] },
+                    ]}
+                  />
+                  <Text style={styles.sectionLabel}>
+                    {RARITY_LABEL[rarity].toUpperCase()}
+                  </Text>
+                  <Text style={styles.sectionCount}>
+                    {list.filter((s) => progress.ownedSkins.includes(s.id)).length}/
+                    {list.length}
+                  </Text>
+                </View>
+                <View style={styles.grid}>
+                  {list.map((s) => (
+                    <SkinCard
+                      key={s.id}
+                      skin={s}
+                      owned={progress.ownedSkins.includes(s.id)}
+                      equipped={progress.equippedSkin === s.id}
+                      onEquip={equip}
+                      onBuy={buyPremium}
+                      shimmerVal={shimmerVal}
+                      purchasing={purchasing === s.id}
+                    />
+                  ))}
+                </View>
+              </View>
+            );
+          })}
 
           {progress.achievements.length > 0 && (
             <>
@@ -296,6 +340,8 @@ function SkinCard({
     }
   };
 
+  const rarityColor = RARITY_COLOR[skin.rarity];
+
   return (
     <TouchableOpacity
       activeOpacity={isPremium || owned ? 0.85 : 1}
@@ -303,14 +349,25 @@ function SkinCard({
         styles.card,
         equipped && styles.cardEquipped,
         locked && styles.cardLocked,
+        { borderColor: locked ? "#0F172A" : rarityColor, borderWidth: locked ? 2 : 2.5 },
       ]}
       onPress={handlePress}
       testID={`skin-card-${skin.id}`}
     >
+      <View
+        style={[
+          styles.rarityBadge,
+          { backgroundColor: rarityColor },
+        ]}
+      >
+        <Text style={styles.rarityBadgeText}>
+          {RARITY_LABEL[skin.rarity].toUpperCase()}
+        </Text>
+      </View>
       {isPremium && (
         <View style={styles.premiumBadge}>
-          <Ionicons name="diamond" size={10} color="#0F172A" />
-          <Text style={styles.premiumBadgeText}>PREMIUM</Text>
+          <Ionicons name="diamond" size={9} color="#0F172A" />
+          <Text style={styles.premiumBadgeText}>$</Text>
         </View>
       )}
       <View style={styles.preview}>
@@ -336,7 +393,9 @@ function SkinCard({
           style={[styles.equipChip, { backgroundColor: "#FDE047" }]}
           testID={`buy-chip-${skin.id}`}
         >
-          <Text style={[styles.equipText, { color: "#0F172A" }]}>BUY $2.99</Text>
+          <Text style={[styles.equipText, { color: "#0F172A" }]}>
+            BUY $2.99
+          </Text>
         </View>
       ) : locked ? (
         <View style={styles.lockChip}>
@@ -420,25 +479,80 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     fontSize: 13,
   },
-  content: { padding: 18, paddingBottom: 40 },
-  sectionLabel: {
+  content: { padding: 18, paddingBottom: 40, gap: 14 },
+  summaryRow: { flexDirection: "row", gap: 10 },
+  summaryBox: {
+    flex: 1,
+    backgroundColor: "rgba(255,255,255,0.78)",
+    borderColor: "#0F172A",
+    borderWidth: 2,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    justifyContent: "center",
+  },
+  summaryLabel: {
+    fontSize: 10,
+    letterSpacing: 2,
+    fontWeight: "900",
+    color: "#0F172A",
+    opacity: 0.7,
+  },
+  summaryValue: { fontSize: 22, fontWeight: "900", color: "#0F172A" },
+  cratesCta: {
+    flex: 2,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#0F172A",
+    borderColor: "#FDE047",
+    borderWidth: 2,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  cratesCtaTitle: {
+    color: "#FDE047",
+    fontWeight: "900",
+    letterSpacing: 1,
+    fontSize: 13,
+  },
+  cratesCtaSub: {
+    color: "#F8FAFC",
+    fontWeight: "700",
     fontSize: 11,
+    opacity: 0.85,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 8,
+    marginBottom: 6,
+  },
+  rarityDot: { width: 10, height: 10, borderRadius: 5 },
+  sectionLabel: {
+    fontSize: 12,
     fontWeight: "900",
     letterSpacing: 3,
     color: "#0F172A",
-    opacity: 0.7,
-    marginBottom: 10,
+  },
+  sectionCount: {
+    marginLeft: "auto",
+    fontSize: 11,
+    fontWeight: "900",
+    color: "#0F172A",
+    opacity: 0.55,
   },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   card: {
     width: "48%",
     backgroundColor: "rgba(255,255,255,0.78)",
-    borderColor: "#0F172A",
-    borderWidth: 2,
     borderRadius: 18,
     padding: 12,
     alignItems: "center",
     minHeight: 200,
+    position: "relative",
   },
   cardEquipped: { backgroundColor: "#FDE047" },
   cardLocked: { opacity: 0.92 },
@@ -450,7 +564,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   skinName: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "900",
     color: "#0F172A",
     textAlign: "center",
@@ -506,6 +620,21 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "900",
     color: "#FFFFFF",
+    letterSpacing: 1,
+  },
+  rarityBadge: {
+    position: "absolute",
+    top: 8,
+    left: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 999,
+    zIndex: 2,
+  },
+  rarityBadgeText: {
+    fontSize: 8,
+    fontWeight: "900",
+    color: "#0F172A",
     letterSpacing: 1,
   },
   premiumBadge: {

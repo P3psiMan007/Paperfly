@@ -11,6 +11,8 @@ export default function RootLayout() {
         <Stack.Screen name="game" />
         <Stack.Screen name="settings" />
         <Stack.Screen name="skins" />
+        <Stack.Screen name="crates" />
+        <Stack.Screen name="leaderboard" />
       </Stack>
     </GestureHandlerRootView>
   );

@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AchievementId, SkinId } from "./skins";
 
-const KEY = "@mmf_progress_v1";
+const KEY = "@mmf_progress_v1"; // legacy prefix kept to preserve existing user data
 
 export type Progress = {
   xp: number;
@@ -15,6 +15,12 @@ export type Progress = {
   equippedSkin: SkinId;
   lastDailySeed?: string;
   lastDailyScore?: number;
+  // ── crate / key economy ───────────────────────────────
+  keys: number;
+  crates: number;
+  cratesOpened: number;
+  duplicateDustXp: number;
+  playerName?: string;
 };
 
 export const DEFAULT_PROGRESS: Progress = {
@@ -27,10 +33,13 @@ export const DEFAULT_PROGRESS: Progress = {
   achievements: [],
   ownedSkins: ["origami"],
   equippedSkin: "origami",
+  keys: 0,
+  crates: 1, // start with 1 free crate as a teaser
+  cratesOpened: 0,
+  duplicateDustXp: 0,
 };
 
 // XP thresholds (cumulative). Index = level - 1.
-// Level 1 starts at 0 xp. To reach level N you need LEVELS[N-1] xp.
 export const LEVELS = [
   0, 80, 200, 380, 620, 920, 1280, 1700, 2200, 2800, 3500, 4400, 5500, 7000,
 ];
@@ -50,8 +59,7 @@ export function xpForLevel(level: number): number {
 export function nextLevelInfo(xp: number) {
   const cur = levelFromXp(xp);
   const curBase = xpForLevel(cur);
-  const nextBase =
-    cur >= LEVELS.length ? curBase + 2000 : xpForLevel(cur + 1);
+  const nextBase = cur >= LEVELS.length ? curBase + 2000 : xpForLevel(cur + 1);
   const span = nextBase - curBase || 1;
   const into = xp - curBase;
   return {
@@ -68,7 +76,6 @@ export async function loadProgress(): Promise<Progress> {
     const raw = await AsyncStorage.getItem(KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Progress;
-      // Forward-compat: ensure new fields exist
       return { ...DEFAULT_PROGRESS, ...parsed };
     }
   } catch (e) {
@@ -85,7 +92,6 @@ export async function saveProgress(p: Progress): Promise<void> {
   }
 }
 
-// Compute XP gained from a run (called once when run ends).
 export function xpFromRun(score: number, rings: number, seconds: number): number {
   return Math.round(score * 0.4 + rings * 6 + seconds * 1.2);
 }
@@ -106,15 +112,15 @@ export type RunResult = {
   unlockedAchievements: AchievementId[];
   unlockedSkinsByAchievement: SkinId[];
   newBestScore: boolean;
+  cratesEarned: number;
 };
 
-// Apply a run to progress (mutates a copy and returns it + result).
 export function applyRun(
   prev: Progress,
   stats: RunStats,
-  // Provided to avoid circular import with skins.ts at runtime
   achievementIdsBySkin: Partial<Record<SkinId, AchievementId>>,
-  skinsUnlockedByLevel: { id: SkinId; level: number }[]
+  skinsUnlockedByLevel: { id: SkinId; level: number }[],
+  cratesEarned: number = 0
 ): { next: Progress; result: RunResult } {
   const next: Progress = { ...prev };
   const xpGained = xpFromRun(stats.score, stats.rings, stats.seconds);
@@ -123,10 +129,10 @@ export function applyRun(
   next.totalBoosts = prev.totalBoosts + stats.boosts;
   next.totalCrashes = prev.totalCrashes + (stats.crashed ? 1 : 0);
   next.longestRunSec = Math.max(prev.longestRunSec, stats.seconds);
+  next.crates = (prev.crates || 0) + cratesEarned;
   const newBestScore = stats.score > prev.bestScore;
   next.bestScore = Math.max(prev.bestScore, stats.score);
 
-  // Achievements
   const unlockedAchievements: AchievementId[] = [];
   const newAch = (id: AchievementId, cond: boolean) => {
     if (cond && !next.achievements.includes(id)) {
@@ -140,7 +146,6 @@ export function applyRun(
   newAch("score_500", stats.score >= 500);
   newAch("first_crash", stats.crashed);
 
-  // Skin unlocks via achievement
   const unlockedSkinsByAchievement: SkinId[] = [];
   for (const ach of unlockedAchievements) {
     const skinId = (Object.entries(achievementIdsBySkin).find(
@@ -152,7 +157,6 @@ export function applyRun(
     }
   }
 
-  // Skin unlocks via level
   const prevLevel = levelFromXp(prev.xp);
   const newLevel = levelFromXp(next.xp);
   const leveledUp = newLevel > prevLevel;
@@ -180,6 +184,7 @@ export function applyRun(
       unlockedAchievements,
       unlockedSkinsByAchievement,
       newBestScore,
+      cratesEarned,
     },
   };
 }

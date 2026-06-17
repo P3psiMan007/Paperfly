@@ -40,7 +40,6 @@ export default function Index() {
   const refresh = useCallback(async () => {
     const p = await loadProgress();
     setProgress(p);
-    // Best-effort: pull premium skins owned on backend (post-purchase)
     try {
       const owned = await getOwnedSkins();
       if (owned.length) {
@@ -146,12 +145,24 @@ export default function Index() {
               <Text style={styles.eyebrow} testID="title-eyebrow">
                 TILT TO FLY
               </Text>
-              <Text style={styles.title}>Mr. Maybe</Text>
-              <Text style={styles.titleAccent}>Flight</Text>
+              <Text style={styles.title}>Paper</Text>
+              <Text style={styles.titleAccent}>Fly</Text>
             </View>
-            <View style={styles.levelBadge} testID="level-badge">
-              <Ionicons name="star" size={12} color="#0F172A" />
-              <Text style={styles.levelBadgeText}>LVL {lvl.level}</Text>
+            <View style={{ alignItems: "flex-end", gap: 6 }}>
+              <View style={styles.levelBadge} testID="level-badge">
+                <Ionicons name="star" size={12} color="#0F172A" />
+                <Text style={styles.levelBadgeText}>LVL {lvl.level}</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.crateChip}
+                onPress={() => router.push("/crates")}
+                testID="crates-chip"
+              >
+                <Ionicons name="cube" size={12} color="#0F172A" />
+                <Text style={styles.crateChipText}>{progress.crates}</Text>
+                <Ionicons name="key" size={12} color="#0F172A" />
+                <Text style={styles.crateChipText}>{progress.keys}</Text>
+              </TouchableOpacity>
             </View>
           </View>
 
@@ -206,20 +217,44 @@ export default function Index() {
               <Text style={styles.primaryBtnText}>START GAME</Text>
             </TouchableOpacity>
 
+            <View style={styles.row}>
+              <TouchableOpacity
+                style={styles.dailyBtn}
+                activeOpacity={0.85}
+                onPress={() =>
+                  router.push({ pathname: "/game", params: { daily: "1" } })
+                }
+                testID="daily-button"
+              >
+                <Ionicons name="calendar" size={16} color="#0F172A" />
+                <Text style={styles.dailyBtnText}>DAILY</Text>
+                {dailyTodayBest > 0 && (
+                  <View style={styles.dailyChip}>
+                    <Text style={styles.dailyChipText}>{dailyTodayBest}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.dailyBtn}
+                activeOpacity={0.85}
+                onPress={() => router.push("/leaderboard")}
+                testID="leaderboard-button"
+              >
+                <Ionicons name="trophy" size={16} color="#0F172A" />
+                <Text style={styles.dailyBtnText}>LEADERBOARD</Text>
+              </TouchableOpacity>
+            </View>
+
             <TouchableOpacity
-              style={styles.dailyBtn}
+              style={styles.crateBtn}
               activeOpacity={0.85}
-              onPress={() =>
-                router.push({ pathname: "/game", params: { daily: "1" } })
-              }
-              testID="daily-button"
+              onPress={() => router.push("/crates")}
+              testID="crates-button"
             >
-              <Ionicons name="calendar" size={18} color="#0F172A" />
-              <Text style={styles.dailyBtnText}>DAILY CHALLENGE</Text>
-              {dailyTodayBest > 0 && (
-                <View style={styles.dailyChip}>
-                  <Text style={styles.dailyChipText}>{dailyTodayBest}</Text>
-                </View>
+              <Ionicons name="cube" size={18} color="#FDE047" />
+              <Text style={styles.crateBtnText}>OPEN CRATES</Text>
+              {progress.crates > 0 && progress.keys > 0 && (
+                <View style={styles.crateReadyDot} />
               )}
             </TouchableOpacity>
 
@@ -290,18 +325,18 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   title: {
-    fontSize: 46,
+    fontSize: 56,
     fontWeight: "900",
     color: "#0F172A",
     letterSpacing: -2,
-    lineHeight: 48,
+    lineHeight: 58,
   },
   titleAccent: {
-    fontSize: 46,
+    fontSize: 56,
     fontWeight: "900",
     color: "#FDE047",
     letterSpacing: -2,
-    lineHeight: 48,
+    lineHeight: 58,
   },
   levelBadge: {
     flexDirection: "row",
@@ -313,13 +348,29 @@ const styles = StyleSheet.create({
     borderColor: "#0F172A",
     borderWidth: 2,
     borderRadius: 999,
-    marginTop: 8,
   },
   levelBadgeText: {
     fontSize: 11,
     fontWeight: "900",
     color: "#0F172A",
     letterSpacing: 1.5,
+  },
+  crateChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: "rgba(255,255,255,0.78)",
+    borderColor: "#0F172A",
+    borderWidth: 2,
+    borderRadius: 999,
+  },
+  crateChipText: {
+    fontSize: 11,
+    fontWeight: "900",
+    color: "#0F172A",
+    marginRight: 4,
   },
   planeBox: {
     alignItems: "center",
@@ -382,21 +433,22 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   dailyBtn: {
+    flex: 1,
     backgroundColor: "#A5F3FC",
     borderColor: "#0F172A",
     borderWidth: 2,
-    borderRadius: 18,
-    paddingVertical: 14,
+    borderRadius: 16,
+    paddingVertical: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
+    gap: 6,
   },
   dailyBtnText: {
     color: "#0F172A",
     fontWeight: "900",
-    fontSize: 14,
-    letterSpacing: 1.2,
+    fontSize: 12,
+    letterSpacing: 1,
   },
   dailyChip: {
     backgroundColor: "#0F172A",
@@ -408,6 +460,35 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 11,
     fontWeight: "900",
+  },
+  crateBtn: {
+    backgroundColor: "#0F172A",
+    borderColor: "#FDE047",
+    borderWidth: 2,
+    borderRadius: 18,
+    paddingVertical: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    position: "relative",
+  },
+  crateBtnText: {
+    color: "#FDE047",
+    fontWeight: "900",
+    fontSize: 14,
+    letterSpacing: 1.5,
+  },
+  crateReadyDot: {
+    position: "absolute",
+    top: 8,
+    right: 14,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#EC4899",
+    borderWidth: 1.5,
+    borderColor: "#FDE047",
   },
   row: { flexDirection: "row", gap: 8 },
   secondaryBtn: {

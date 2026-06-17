@@ -34,6 +34,8 @@ import {
   RunResult,
 } from "../src/progression";
 import { SKINS, ACHIEVEMENTS, AchievementId, SkinId } from "../src/skins";
+import { cratesEarnedForRun } from "../src/crates";
+import { submitDailyScore } from "../src/api";
 import { mulberry32, todaySeed, todaySeedString } from "../src/daily";
 import { playSfx, preloadSounds, loadSfxEnabled } from "../src/audio";
 
@@ -293,11 +295,13 @@ export default function Game() {
     };
     try {
       const cur = await loadProgress();
+      const crates = cratesEarnedForRun(finalScore);
       const { next, result } = applyRun(
         cur,
         stats,
         SKIN_BY_ACHIEVEMENT,
-        SKINS_BY_LEVEL
+        SKINS_BY_LEVEL,
+        crates
       );
       // Track daily best for this seed
       if (isDaily) {
@@ -306,6 +310,14 @@ export default function Game() {
           next.lastDailySeed === seedStr ? next.lastDailyScore || 0 : 0;
         next.lastDailySeed = seedStr;
         next.lastDailyScore = Math.max(prevDaily, finalScore);
+        // Submit to leaderboard (best-effort)
+        const playerName = (next.playerName || "").trim() || "Anonymous";
+        submitDailyScore({
+          name: playerName,
+          score: finalScore,
+          rings: collectedRingsRef.current,
+          seed: seedStr,
+        }).catch((e) => console.warn("leaderboard submit failed", e));
       }
       await saveProgress(next);
       setProgress(next);
@@ -319,7 +331,7 @@ export default function Game() {
     const finalScore = Math.floor(scoreRef.current);
     const tag = isDaily
       ? `Daily Challenge ${todaySeedString()}`
-      : "Mr. Maybe Flight";
+      : "Paper Fly";
     const message = `${tag} — I scored ${finalScore} points and collected ${collectedRingsRef.current} rings! Can you beat me? ✈️`;
     try {
       await Share.share({ message });
@@ -865,6 +877,18 @@ export default function Game() {
                   +{runResult.xpGained} XP
                 </Text>
               </View>
+              {runResult.cratesEarned > 0 && (
+                <View
+                  style={[styles.xpBadge, { backgroundColor: "#0F172A" }]}
+                  testID="crates-earned-badge"
+                >
+                  <Ionicons name="cube" size={14} color="#FDE047" />
+                  <Text style={[styles.xpBadgeText, { color: "#FDE047" }]}>
+                    +{runResult.cratesEarned} CRATE
+                    {runResult.cratesEarned > 1 ? "S" : ""}
+                  </Text>
+                </View>
+              )}
               {runResult.leveledUp && (
                 <Text style={styles.unlockText}>
                   Level Up → {runResult.newLevel}!

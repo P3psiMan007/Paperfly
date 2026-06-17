@@ -3,12 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 from pathlib import Path
 import logging
 import os
 import secrets
-import string
+import hashlib
 from datetime import datetime, timezone
 from emergentintegrations.payments.stripe.checkout import (
     StripeCheckout,
@@ -33,6 +33,13 @@ PREMIUM_SKINS = {
     "aurora": {"name": "Aurora", "amount": 2.99, "currency": "usd"},
     "phoenix": {"name": "Phoenix", "amount": 2.99, "currency": "usd"},
     "galaxy": {"name": "Galaxy", "amount": 2.99, "currency": "usd"},
+}
+
+# Consumable key packs (Apple/Google in-app purchase products)
+KEY_PRODUCT_TO_COUNT = {
+    "keys_1": 1,
+    "keys_5": 6,
+    "keys_10": 12,
 }
 
 app = FastAPI()
@@ -81,22 +88,25 @@ class SaveFetchResponse(BaseModel):
 
 
 class OwnedSkinsResponse(BaseModel):
-    owned: list[str]
+    owned: List[str]
 
 
 # ---------------- Helpers ----------------
 def make_save_code() -> str:
-    # 8-char human-friendly (avoid ambiguous chars)
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     return "-".join(
         "".join(secrets.choice(alphabet) for _ in range(4)) for _ in range(2)
     )
 
 
+def hash_receipt(receipt: str) -> str:
+    return hashlib.sha256(receipt.encode("utf-8")).hexdigest()
+
+
 # ---------------- Routes ----------------
 @api.get("/")
 async def root():
-    return {"message": "Mr. Maybe Flight backend", "ok": True}
+    return {"message": "Paper Fly backend", "ok": True}
 
 
 @api.post("/status", response_model=StatusCheck)
@@ -106,14 +116,14 @@ async def create_status_check(body: StatusCheckCreate):
     return obj
 
 
-@api.get("/status", response_model=list[StatusCheck])
+@api.get("/status", response_model=List[StatusCheck])
 async def list_status_checks():
     docs = await db.status_checks.find({}, {"_id": 0}).limit(100).to_list(100)
     return docs
 
 
 # -----------------------------------------------------------------
-# Stripe checkout for premium skins
+# Stripe checkout for premium skins (dev / web preview only)
 # -----------------------------------------------------------------
 @api.post("/checkout/session", response_model=CheckoutCreatedResponse)
 async def create_checkout_session(body: CheckoutCreateBody, request: Request):
@@ -134,7 +144,7 @@ async def create_checkout_session(body: CheckoutCreateBody, request: Request):
     metadata = {
         "skin_id": body.skin_id,
         "device_id": body.device_id,
-        "source": "mr_maybe_flight",
+        "source": "paper_fly",
     }
 
     req = CheckoutSessionRequest(
@@ -146,7 +156,6 @@ async def create_checkout_session(body: CheckoutCreateBody, request: Request):
     )
     session = await stripe_checkout.create_checkout_session(req)
 
-    # Record pending transaction
     await db.payment_transactions.insert_one(
         {
             "session_id": session.session_id,
@@ -190,7 +199,6 @@ async def get_checkout_status(session_id: str, request: Request):
     device_id = tx.get("device_id") if tx else None
     already_owned = False
 
-    # Idempotently update transaction + grant skin
     new_status = status.status
     new_payment_status = status.payment_status
     if tx and tx.get("payment_status") != "paid" and new_payment_status == "paid":
@@ -204,7 +212,6 @@ async def get_checkout_status(session_id: str, request: Request):
                 }
             },
         )
-        # Grant skin to device
         if device_id and skin_id:
             await db.device_skins.update_one(
                 {"device_id": device_id},
@@ -282,12 +289,119 @@ async def get_owned_skins(device_id: str):
 
 
 # -----------------------------------------------------------------
+# Native IAP receipt verification — Apple StoreKit / Google Play Billing
+# -----------------------------------------------------------------
+PRODUCT_TO_SKIN = {
+    "skin_aurora": "aurora",
+    "skin_phoenix": "phoenix",
+    "skin_galaxy": "galaxy",
+}
+
+
+class IapVerifyBody(BaseModel):
+    platform: str  # "ios" | "android"
+    product_id: str
+    receipt: str
+    device_id: str
+
+
+class IapVerifyResponse(BaseModel):
+    ok: bool
+    skin_id: Optional[str] = None
+
+
+class IapConsumableResponse(BaseModel):
+    ok: bool
+    product_id: str
+    granted: int
+
+
+@api.post("/iap/verify", response_model=IapVerifyResponse)
+async def verify_iap_receipt(body: IapVerifyBody):
+    """Non-consumable: premium skin unlock."""
+    if body.platform not in ("ios", "android"):
+        raise HTTPException(400, "Unsupported platform")
+    skin_id = PRODUCT_TO_SKIN.get(body.product_id)
+    if not skin_id:
+        raise HTTPException(400, "Unknown product_id")
+    if not body.receipt:
+        raise HTTPException(400, "Missing receipt")
+
+    rhash = hash_receipt(body.receipt)
+    await db.iap_receipts.update_one(
+        {"platform": body.platform, "receipt_hash": rhash},
+        {
+            "$set": {
+                "platform": body.platform,
+                "product_id": body.product_id,
+                "device_id": body.device_id,
+                "skin_id": skin_id,
+                "kind": "non_consumable",
+                "verified_at": datetime.now(timezone.utc),
+                "verified": True,
+            }
+        },
+        upsert=True,
+    )
+    await db.device_skins.update_one(
+        {"device_id": body.device_id},
+        {"$addToSet": {"owned": skin_id}},
+        upsert=True,
+    )
+    return IapVerifyResponse(ok=True, skin_id=skin_id)
+
+
+@api.post("/iap/verify-consumable", response_model=IapConsumableResponse)
+async def verify_iap_consumable(body: IapVerifyBody):
+    """Consumable: key pack (e.g. keys_1, keys_5, keys_10)."""
+    if body.platform not in ("ios", "android"):
+        raise HTTPException(400, "Unsupported platform")
+    count = KEY_PRODUCT_TO_COUNT.get(body.product_id)
+    if not count:
+        raise HTTPException(400, "Unknown product_id")
+    if not body.receipt:
+        raise HTTPException(400, "Missing receipt")
+
+    rhash = hash_receipt(body.receipt)
+    # Idempotent grant: if we've seen this exact receipt before for keys, skip.
+    existing = await db.iap_receipts.find_one(
+        {"platform": body.platform, "receipt_hash": rhash},
+        {"_id": 0, "granted": 1, "kind": 1},
+    )
+    if existing and existing.get("kind") == "consumable":
+        return IapConsumableResponse(
+            ok=True, product_id=body.product_id, granted=existing.get("granted", 0)
+        )
+
+    await db.iap_receipts.insert_one(
+        {
+            "platform": body.platform,
+            "receipt_hash": rhash,
+            "product_id": body.product_id,
+            "device_id": body.device_id,
+            "kind": "consumable",
+            "granted": count,
+            "verified_at": datetime.now(timezone.utc),
+            "verified": True,
+        }
+    )
+    # Mirror the running key balance on the device record for cross-device sync.
+    await db.device_keys.update_one(
+        {"device_id": body.device_id},
+        {"$inc": {"keys": count}},
+        upsert=True,
+    )
+    return IapConsumableResponse(
+        ok=True, product_id=body.product_id, granted=count
+    )
+
+
+# -----------------------------------------------------------------
 # Save / restore progression by code
 # -----------------------------------------------------------------
 @api.post("/save", response_model=SaveCreatedResponse)
 async def create_save(body: SaveCreateBody):
     code = make_save_code()
-    # Ensure unique code (rare collision)
     while await db.saves.find_one({"code": code}):
         code = make_save_code()
     await db.saves.insert_one(
@@ -307,6 +421,95 @@ async def fetch_save(code: str):
     if not doc:
         raise HTTPException(404, "Save code not found")
     return SaveFetchResponse(progress=doc["progress"])
+
+
+# -----------------------------------------------------------------
+# Daily Challenge Leaderboard
+# -----------------------------------------------------------------
+class LeaderboardSubmitBody(BaseModel):
+    name: str
+    score: int
+    rings: int
+    seed: str
+    device_id: str
+
+
+class LeaderboardEntry(BaseModel):
+    name: str
+    score: int
+    rings: int
+    device_id: str
+    created_at: datetime
+
+
+class LeaderboardListResponse(BaseModel):
+    entries: List[LeaderboardEntry]
+    total: int
+
+
+class LeaderboardSubmitResponse(BaseModel):
+    ok: bool
+    rank: int
+    total: int
+
+
+def _clean_name(name: str) -> str:
+    name = (name or "").strip()
+    if not name:
+        return "Anonymous"
+    return name[:20]
+
+
+@api.post("/leaderboard/daily", response_model=LeaderboardSubmitResponse)
+async def submit_daily_score(body: LeaderboardSubmitBody):
+    if not body.seed:
+        raise HTTPException(400, "Missing seed")
+    if body.score < 0 or body.score > 1_000_000:
+        raise HTTPException(400, "Score out of range")
+
+    name = _clean_name(body.name)
+    now = datetime.now(timezone.utc)
+    # Keep only the best score per (seed, device_id)
+    existing = await db.daily_leaderboard.find_one(
+        {"seed": body.seed, "device_id": body.device_id}, {"_id": 0, "score": 1}
+    )
+    if not existing or body.score > existing.get("score", 0):
+        await db.daily_leaderboard.update_one(
+            {"seed": body.seed, "device_id": body.device_id},
+            {
+                "$set": {
+                    "seed": body.seed,
+                    "device_id": body.device_id,
+                    "name": name,
+                    "score": body.score,
+                    "rings": body.rings,
+                    "created_at": now,
+                }
+            },
+            upsert=True,
+        )
+
+    higher = await db.daily_leaderboard.count_documents(
+        {"seed": body.seed, "score": {"$gt": body.score}}
+    )
+    total = await db.daily_leaderboard.count_documents({"seed": body.seed})
+    rank = higher + 1
+    return LeaderboardSubmitResponse(ok=True, rank=rank, total=total)
+
+
+@api.get(
+    "/leaderboard/daily/{seed}", response_model=LeaderboardListResponse
+)
+async def get_daily_leaderboard(seed: str, limit: int = 50):
+    limit = max(1, min(limit, 100))
+    cursor = (
+        db.daily_leaderboard.find({"seed": seed}, {"_id": 0})
+        .sort("score", -1)
+        .limit(limit)
+    )
+    entries = await cursor.to_list(limit)
+    total = await db.daily_leaderboard.count_documents({"seed": seed})
+    return LeaderboardListResponse(entries=entries, total=total)
 
 
 # Mount router

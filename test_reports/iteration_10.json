@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 10 — Paper Fly rename + crates/keys + daily leaderboard verification. Backend 16/16 pytest GREEN (rename, save, owned-skins, consumable IAP for keys_1/keys_5/keys_10 + idempotency, non-consumable IAP, daily leaderboard submit/list/best-per-device/anonymous-fallback/score-bounds/seed-required). Frontend Playwright pass at 390x844: home renders 'Paper'+'Fly' (no 'Mr. Maybe'), crate/key chip shows live counts, all three CTAs (crates-button/daily-button/leaderboard-button) present. /crates screen shows crate-count=1, key-count=0, odds table (Common 55% / Rare 25% / Epic 12% / Legendary 6% / Mythic 2%), all three packs (buy-keys_1/5/10) tappable; pressing buy-keys_1 on web grants +1 key locally via the Alert+fallback as designed. /skins shows 5 rarity sections (COMMON/RARE/EPIC/LEGENDARY/MYTHIC), 17 skin cards, collection counter '1/17', rarity badges in top-left, and 'Open crates to find...' lock chip on crate-only commons. /leaderboard route loads ('Daily Top 50' + seed pill + 0 players state) without crash. Web preview did NOT crash on /skins or /crates — IAP guard works. CRITICAL BUG FOUND & FIXED: /settings red-screened with 'ReferenceError: playerName is not defined' (app/settings.tsx referenced playerName and onPlayerNameChange but never declared them). Added the missing state, initial-load hydration from progress.playerName, and async-saving onChange handler. After expo restart, settings loads cleanly, the new YOUR NAME input accepts text, and value persists across reload via AsyncStorage (verified TEST_SkyAce survived reload). 0 console errors after fix.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration10.py",
+    "/app/test_reports/pytest/iter10_results.xml"
+  ],
+  "action_items": [
+    "Verify the settings.tsx fix is acceptable — testing agent added playerName state + onPlayerNameChange handler that saves to AsyncStorage via saveProgress({...cur, playerName: v}). Confirm the storage shape matches expectations (Progress.playerName already typed as optional string in src/progression.ts:23, so this is consistent).",
+    "Optional polish: KEY_PACKS in src/crates.ts (keys_5 -> 6 keys, keys_10 -> 12 keys) matches backend KEY_PRODUCT_TO_COUNT exactly — but the review-request mentions key packs of '1, 6, 12'; UI shows '1 / 6 / 12'. priceLabel strings ('$0.99 / $3.99 / $6.99') are hard-coded — for production these should come from the platform IAP product metadata so the displayed price matches the user's locale/currency.",
+    "Optional: the 'shadow*' style deprecation warnings spam the expo log on every render (PaperPlane + crate reveal use shadowColor/shadowOpacity/shadowRadius). RN-Web 0.20+ wants boxShadow. Non-blocking; cosmetic warning only."
+  ],
+  "critical_code_review_comments": [
+    "app/settings.tsx (BEFORE FIX): referenced undefined variables `playerName` and `onPlayerNameChange` in the TextInput at lines 133-134 — this was a guaranteed red-screen as soon as the user opened /settings. RCA: feature was added without wiring the React state. Fixed by declaring `const [playerName, setPlayerName] = useState<string>('')`, hydrating from `progress.playerName` in the existing useEffect, and adding a handler that persists via `saveProgress({...cur, playerName: v})`.",
+    "Backend /api/iap/verify-consumable is correctly idempotent — second POST with the same receipt_hash returns the original granted count without double-incrementing db.device_keys. Verified via test_verify_consumable_idempotent.",
+    "Backend /api/leaderboard/daily correctly keeps best-score-per-(seed, device_id) — repeated submissions with lower scores don't shadow the higher one. Verified via test_leaderboard_keeps_best_per_device.",
+    "Backend score bounds (0..1_000_000) and empty-seed rejection both enforced.",
+    "src/crates.ts pickRarity uses a clean weighted sum; weights total 100 so the distribution math is exact. Up to 4 retries before falling back to common — fine because every rarity has at least one skin.",
+    "app/crates.tsx initializes IAP listeners in useEffect and calls endPurchases() on unmount — good. The web-fallback in buyKeys() correctly grants keys locally via saveProgress so the open-crate flow can be exercised in preview."
+  ],
+  "updated_files": [
+    "/app/frontend/app/settings.tsx (fixed undefined playerName/onPlayerNameChange ReferenceError)",
+    "/app/backend/tests/test_iteration10.py (new — 16 tests covering rename, save, consumable IAP, non-consumable IAP, daily leaderboard)"
+  ],
+  "success_rate": {
+    "backend": "100% (16/16 pytest)",
+    "frontend": "100% after the settings fix — all 16 review-request frontend assertions verified (rename, chip, nav, crates UI, key pack buy, rarity sections, 17 skins, /17 counter, rarity badges, lock chips, /leaderboard renders, /skins+/crates do not crash, YOUR NAME persists)"
+  },
+  "seed_data_creation": "Created ephemeral TEST_-prefixed leaderboard entries and TEST_-prefixed device_id IAP receipts during pytest run (each test uses a unique uuid suffix). Backend test data is contained to TEST_-prefixed seeds so it won't collide with the live daily seed. No cleanup endpoint exists; entries are harmless (no UI ever queries TEST_ seeds).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration 10 passes after one critical fix to app/settings.tsx (added missing playerName state + onPlayerNameChange handler — diff is small and localized to lines 41-62). Verified frontend testIDs: crates-chip / crates-button / daily-button / leaderboard-button on home; crate-count / key-count / open-crate-button / buy-keys_1 / buy-keys_5 / buy-keys_10 / crates-back / reveal-overlay on /crates; open-crates-from-skins / skins-back / skin-card-{id} / buy-chip-{id} on /skins; player-name-input on /settings. SKIN_LIST length is 17 (4 common + 3 rare + 3 epic + 4 legendary + 3 mythic). Backend new endpoints all return JSON: POST /api/leaderboard/daily {name,score,rings,seed,device_id} -> {ok, rank, total}; GET /api/leaderboard/daily/{seed}?limit=50 -> {entries[], total}; POST /api/iap/verify-consumable {platform,product_id,receipt,device_id} -> {ok, product_id, granted}. KEY_PRODUCT_TO_COUNT (server) = KEY_PACKS .keys (client) = {keys_1:1, keys_5:6, keys_10:12}. The expo bundler caches old bundles aggressively after code edits — if you see stale ReferenceErrors after a fix, restart expo via `sudo supervisorctl restart expo` and wait ~10s for Metro to rebuild. The 'shadow*' deprecation warnings in expo.err.log are not a real bug — RN-Web 0.20 prefers boxShadow over shadow* but the legacy props still render correctly.",
+  "rca_of_issue": "Bug: /settings red-screen on launch — 'ReferenceError: playerName is not defined' at app/settings.tsx:133-134. Reproduction: open the app and tap settings-button on home. Root cause: the new YOUR NAME card TextInput uses `value={playerName}` and `onChangeText={onPlayerNameChange}` but those identifiers were never declared inside the Settings component. The shape was already supported in `Progress.playerName?: string` (src/progression.ts:23) — only the React state wiring was missing. Mitigation applied: added `const [playerName, setPlayerName] = useState<string>('')`, hydrated it from `progress.playerName` inside the existing initialization useEffect, and added an async `onPlayerNameChange` that calls `saveProgress({...cur, playerName: v})` so changes persist to AsyncStorage. Verified by entering TEST_SkyAce, reloading the page, and observing the value re-hydrated correctly."
+}

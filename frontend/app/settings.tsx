@@ -39,13 +39,25 @@ export default function Settings() {
   const [savedCode, setSavedCode] = useState<string | null>(null);
   const [restoreCode, setRestoreCode] = useState("");
   const [soundOn, setSoundOn] = useState(isSfxEnabled());
+  const [playerName, setPlayerName] = useState<string>("");
 
   useEffect(() => {
     loadSensitivity().then(setSensitivity);
     loadCalibration().then(setCalibration);
-    loadProgress().then(setProgress);
+    loadProgress().then((p) => {
+      setProgress(p);
+      setPlayerName(p.playerName || "");
+    });
     loadSfxEnabled().then(setSoundOn);
   }, []);
+
+  const onPlayerNameChange = async (v: string) => {
+    setPlayerName(v);
+    const cur = await loadProgress();
+    const next = { ...cur, playerName: v };
+    await saveProgress(next);
+    setProgress(next);
+  };
 
   const onSensitivityChange = (v: number) => {
     setSensitivity(v);
@@ -80,7 +92,7 @@ export default function Settings() {
     if (!savedCode) return;
     try {
       await Share.share({
-        message: `My Mr. Maybe Flight save code: ${savedCode}`,
+        message: `My Paper Fly save code: ${savedCode}`,
       });
     } catch {}
   };
@@ -119,6 +131,24 @@ export default function Settings() {
         </View>
 
         <ScrollView contentContainerStyle={styles.content}>
+          <View style={styles.card}>
+            <Text style={styles.cardLabel}>YOUR NAME</Text>
+            <Text style={styles.cardSub}>
+              Used for the Daily Challenge leaderboard. Leave blank to be
+              shown as &quot;Anonymous&quot;.
+            </Text>
+            <TextInput
+              testID="player-name-input"
+              style={styles.input}
+              placeholder="e.g. SkyAce"
+              placeholderTextColor="rgba(15,23,42,0.45)"
+              value={playerName}
+              onChangeText={onPlayerNameChange}
+              maxLength={20}
+              autoCapitalize="words"
+            />
+          </View>
+
           <View style={styles.card}>
             <Text style={styles.cardLabel}>TILT SENSITIVITY</Text>
             <Text style={styles.cardValue}>{sensitivity.toFixed(2)}x</Text>
@@ -167,7 +197,7 @@ export default function Settings() {
             <View style={styles.calibSteps}>
               <Text style={styles.calibStep}>
                 <Text style={styles.calibStepNum}>1.</Text>  Sit comfortably and
-                hold the phone the way you'll play.
+                hold the phone the way you&apos;ll play.
               </Text>
               <Text style={styles.calibStep}>
                 <Text style={styles.calibStepNum}>2.</Text>  Tap{" "}
