@@ -43,9 +43,9 @@ export default function Index() {
     try {
       const owned = await getOwnedSkins();
       if (owned.length) {
-        const merged = Array.from(new Set([...p.ownedSkins, ...owned]));
+        const merged = Array.from(new Set([...p.ownedSkins, ...(owned as any)]));
         if (merged.length !== p.ownedSkins.length) {
-          const updated = { ...p, ownedSkins: merged };
+          const updated = { ...p, ownedSkins: merged as any };
           await saveProgress(updated);
           setProgress(updated);
         }

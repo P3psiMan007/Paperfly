@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 11 — Regression check after game.tsx motion-model overhaul (60Hz sampling, framerate-independent exponential smoothing TAU_ROLL=0.09/TAU_PITCH=0.13, critically-damped spring K_X=80/K_Y=65, velocity-derived visual bank, randomized 0.40-0.70s spawn interval, smoothstep opacity fade, 7-point ghost trail, new refs planePosRef/planeVelRef/visualTiltRef/trailRef/nextSpawnRef). BACKEND: 16/16 pytest GREEN — re-ran /app/backend/tests/test_iteration10.py against the live preview URL; root says 'Paper Fly backend', /api/save roundtrip OK, /api/save/XXXX-XXXX returns 404, /api/owned-skins, /api/iap/verify (skin), /api/iap/verify-consumable (keys_1=1, keys_5=6, keys_10=12) all GREEN, idempotency verified, bad-platform and unknown-product rejected with 400, /api/leaderboard/daily POST+GET ranks correctly, keeps best-per-device, anonymous fallback, score bounds (0..1_000_000) and empty-seed rejection enforced. FRONTEND (390x844 mobile viewport): home renders 'Paper'+'Fly' title (no crash from new motion refs). /game shows Ready overlay with EXACT subtitle 'Tilt to steer · Hold screen to boost' plus FLY button (testID=ready-start-button) + Calibrate button. Pressing FLY DOES transition out of the Ready overlay — confirmed score-display + speed-indicator + pause-button HUD all appear, game loop runs for 4+ seconds with score climbing (28 in 4s from auto-progress), no red screen, no console errors. This proves resetWorld() correctly initializes ALL new physics refs (planePosRef/planeVelRef/visualTiltRef/trailRef/nextSpawnRef) — if any ref were undefined the rAF gameLoop would have thrown immediately. /skins loads with 17 skin cards across all 5 rarity sections (COMMON/RARE/EPIC/LEGENDARY/MYTHIC), /crates loads with open-crate-button + all three pack-buy buttons (buy-keys_1/5/10), /leaderboard loads (length 106, has 'Daily'), /settings loads with player-name-input that accepts text. 0 page errors, 0 console errors across all 6 routes.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration10.py",
+    "/app/test_reports/pytest/iter11_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "game.tsx lines 100-109: all five new refs (planePosRef, planeVelRef, visualTiltRef, trailRef, nextSpawnRef) declared with sensible defaults; resetWorld() lines 257-274 zeroes them on every game start so no stale state across runs. Good.",
+    "game.tsx line 380-383: framerate-independent exponential smoothing alpha = 1 - exp(-dt/tau) is correctly clamped implicitly (dt>0, tau>0 => alpha in (0,1)). Robust against dt spikes.",
+    "game.tsx lines 396-407: critically-damped spring uses D = 2*sqrt(K)*damping with damping 0.9 / 0.95 — slight underdamp gives the requested 'flighty' overshoot without oscillation. Math is sound.",
+    "game.tsx lines 412-423: visual bank derived from screen-space velocity (planeVelRef.current.x/y) with separate smoothing alpha — plane leans INTO turns as specified.",
+    "game.tsx lines 426-433: trail capped at 7 entries via shift() — bounded memory.",
+    "game.tsx line 461: nextSpawnRef set to 0.4 + rand()*0.3 yields range [0.40, 0.70] as specified.",
+    "game.tsx is 1508 lines — exceeds the 700-line guideline. Consider splitting motion/physics, rendering, and HUD into separate modules for maintainability. NON-BLOCKING — current code is correct."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (16/16 pytest)",
+    "frontend": "100% (8/8 review-request assertions verified: home title, /game Ready overlay text+buttons, FLY transition into playing state, /skins 17 cards 5 rarities, /crates buttons, /leaderboard renders, /settings player-name-input works, no crashes/console errors)"
+  },
+  "seed_data_creation": "Re-used TEST_-prefixed leaderboard entries and TEST_-prefixed device_id IAP receipts from the existing test_iteration10.py fixtures (each test uses a fresh uuid suffix). No new seeds; ephemeral data only.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 11 is a pure regression check on game.tsx motion refactor — no backend changes, no new endpoints. The FLY button on /game has testID='ready-start-button' (NOT 'fly-button' as I initially assumed). Verified that resetWorld() (game.tsx:257) initializes all new physics refs so the game loop runs without crashing on transition out of Ready overlay. Backend test suite at /app/backend/tests/test_iteration10.py is the live regression suite — keep using it for future iterations until endpoints change. EXPO_PUBLIC_BACKEND_URL is the only env var consumed by both tests and frontend. Browser console showed 0 errors across 6 routes. The 1508-line game.tsx is large but functional — flagged for future refactor only.",
+  "rca_of_issue": "N/A — no bugs found. All review-request items pass on first attempt."
+}

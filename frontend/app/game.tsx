@@ -96,9 +96,17 @@ export default function Game() {
   const calibRef = useRef<Calibration>({ pitch: 0, roll: 0 });
   const rawTiltRef = useRef({ pitch: 0, roll: 0 });
   const smoothTiltRef = useRef({ pitch: 0, roll: 0 });
+  // Spring-damped plane position (world units) + velocity, gives flighty inertia.
+  const planePosRef = useRef({ x: 0, y: 0 });
+  const planeVelRef = useRef({ x: 0, y: 0 });
+  // Visual roll/pitch derived from screen-space velocity (banking into turns).
+  const visualTiltRef = useRef({ roll: 0, pitch: 0 });
+  // Trail of past plane positions for the speed-feel trail.
+  const trailRef = useRef<{ x: number; y: number; t: number }[]>([]);
   const objectsRef = useRef<WorldObj[]>([]);
   const lastFrameRef = useRef(performance.now());
   const lastSpawnRef = useRef(0);
+  const nextSpawnRef = useRef(0.55);
   const speedRef = useRef(BASE_SPEED);
   const boostRef = useRef(false);
   const brakeRef = useRef(false);
@@ -159,7 +167,7 @@ export default function Game() {
 
       if (dmAvailable) {
         try {
-          DeviceMotion.setUpdateInterval(33); // ~30 Hz, smoother
+          DeviceMotion.setUpdateInterval(16); // ~60 Hz for smooth flight
           dmSub = DeviceMotion.addListener((data: any) => {
             const r = data?.rotation;
             if (r) {
@@ -176,7 +184,7 @@ export default function Game() {
       try {
         const ok = await Accelerometer.isAvailableAsync();
         if (!cancelled && ok) {
-          Accelerometer.setUpdateInterval(33);
+          Accelerometer.setUpdateInterval(16);
           accelSub = Accelerometer.addListener(({ x, y }) => {
             rawTiltRef.current = { roll: x, pitch: y };
           });
@@ -254,11 +262,16 @@ export default function Game() {
     boostRef.current = false;
     brakeRef.current = false;
     smoothTiltRef.current = { pitch: 0, roll: 0 };
+    planePosRef.current = { x: 0, y: 0 };
+    planeVelRef.current = { x: 0, y: 0 };
+    visualTiltRef.current = { roll: 0, pitch: 0 };
+    trailRef.current = [];
     setBoostActive(false);
     setBrakeActive(false);
     setScore(0);
     lastFrameRef.current = performance.now();
     lastSpawnRef.current = 0;
+    nextSpawnRef.current = 0.45;
     runStartRef.current = performance.now();
     boostsThisRunRef.current = 0;
     wasBoostingRef.current = false;
@@ -353,7 +366,6 @@ export default function Game() {
         const DEAD_ZONE = 0.06;
         const applyDeadZone = (v: number) => {
           if (Math.abs(v) < DEAD_ZONE) return 0;
-          // Re-scale so output starts smoothly from 0 past the dead zone
           const sign = v < 0 ? -1 : 1;
           return sign * ((Math.abs(v) - DEAD_ZONE) / (1 - DEAD_ZONE));
         };
@@ -363,13 +375,63 @@ export default function Game() {
         const targetRoll = Math.max(-1, Math.min(1, rawRoll));
         const targetPitch = Math.max(-1, Math.min(1, rawPitch));
 
-        // Heavier smoothing on pitch (vertical) to kill jitter; roll stays responsive.
-        const SMOOTH_ROLL = 0.18;
-        const SMOOTH_PITCH = 0.07;
+        // Framerate-independent exponential smoothing of the *intent* tilt.
+        // Lower tau = snappier, higher tau = creamier.  Roll is snappy, pitch slightly slower.
+        const TAU_ROLL = 0.09;
+        const TAU_PITCH = 0.13;
+        const aRoll = 1 - Math.exp(-dt / TAU_ROLL);
+        const aPitch = 1 - Math.exp(-dt / TAU_PITCH);
         smoothTiltRef.current.roll +=
-          (targetRoll - smoothTiltRef.current.roll) * SMOOTH_ROLL;
+          (targetRoll - smoothTiltRef.current.roll) * aRoll;
         smoothTiltRef.current.pitch +=
-          (targetPitch - smoothTiltRef.current.pitch) * SMOOTH_PITCH;
+          (targetPitch - smoothTiltRef.current.pitch) * aPitch;
+
+        // --- Flight dynamics: critically-damped spring on (x, y) world position ---
+        // Target world position from intent tilt.
+        const tgtX =
+          smoothTiltRef.current.roll * sensRef.current * PLANE_X_RANGE;
+        const tgtY =
+          -smoothTiltRef.current.pitch * sensRef.current * PLANE_Y_RANGE;
+        // Spring constants (per second).  Higher k = stiffer; tuned for flighty inertia.
+        const K_X = 80; // horizontal springiness
+        const K_Y = 65; // vertical (slightly softer for soft climb)
+        const D_X = 2 * Math.sqrt(K_X) * 0.9; // ~critically damped, slight underdamp
+        const D_Y = 2 * Math.sqrt(K_Y) * 0.95;
+        const ax =
+          K_X * (tgtX - planePosRef.current.x) - D_X * planeVelRef.current.x;
+        const ay =
+          K_Y * (tgtY - planePosRef.current.y) - D_Y * planeVelRef.current.y;
+        planeVelRef.current.x += ax * dt;
+        planeVelRef.current.y += ay * dt;
+        planePosRef.current.x += planeVelRef.current.x * dt;
+        planePosRef.current.y += planeVelRef.current.y * dt;
+
+        // Visual bank: derive roll/pitch from current screen-space velocity.
+        // This makes the plane *lean into* turns and *pitch up* when climbing.
+        const visRollTarget = Math.max(
+          -1,
+          Math.min(1, planeVelRef.current.x / 320)
+        );
+        const visPitchTarget = Math.max(
+          -1,
+          Math.min(1, -planeVelRef.current.y / 220)
+        );
+        const aVis = 1 - Math.exp(-dt / 0.08);
+        visualTiltRef.current.roll +=
+          (visRollTarget - visualTiltRef.current.roll) * aVis;
+        visualTiltRef.current.pitch +=
+          (visPitchTarget - visualTiltRef.current.pitch) * aVis;
+
+        // Trail history for the speed-feel ghost trail.
+        const lastTrail = trailRef.current[trailRef.current.length - 1];
+        if (!lastTrail || now - lastTrail.t > 32) {
+          trailRef.current.push({
+            x: planePosRef.current.x,
+            y: planePosRef.current.y,
+            t: now,
+          });
+          if (trailRef.current.length > 7) trailRef.current.shift();
+        }
 
         const target = boostRef.current
           ? BOOST_SPEED
@@ -390,10 +452,13 @@ export default function Game() {
           );
         }
 
+        // Organic spawn rhythm: vary the gap so it doesn't feel mechanical.
         lastSpawnRef.current += dt;
-        if (lastSpawnRef.current >= 0.55) {
+        if (lastSpawnRef.current >= nextSpawnRef.current) {
           lastSpawnRef.current = 0;
           const rand = dailyRngRef.current ? dailyRngRef.current : Math.random;
+          // Next gap is between 0.40s and 0.70s (slightly faster on average than 0.55).
+          nextSpawnRef.current = 0.4 + rand() * 0.3;
           const isRing = rand() < 0.6;
           objectsRef.current.push({
             id: nextId++,
@@ -406,10 +471,8 @@ export default function Game() {
           });
         }
 
-        const planeWorldX =
-          smoothTiltRef.current.roll * sensRef.current * PLANE_X_RANGE;
-        const planeWorldY =
-          -smoothTiltRef.current.pitch * sensRef.current * PLANE_Y_RANGE;
+        const planeWorldX = planePosRef.current.x;
+        const planeWorldY = planePosRef.current.y;
 
         const objs = objectsRef.current;
         for (let i = objs.length - 1; i >= 0; i--) {
@@ -423,7 +486,6 @@ export default function Game() {
             const dx = o.x - planeWorldX;
             const dy = o.y - planeWorldY;
             const distSq = dx * dx + dy * dy;
-            // Tighter hitboxes: obstacles forgiving, rings still easy to collect
             const hitR =
               o.type === "ring"
                 ? o.baseSize * 0.55 + PLANE_SIZE * 0.22
@@ -510,13 +572,18 @@ export default function Game() {
   const cx = SW / 2;
   // Anchor plane at ~62% of screen height (lower-center is the visual focus)
   const planeAnchorY = SH * 0.62;
-  const planeWorldX =
-    smoothTiltRef.current.roll * sensRef.current * PLANE_X_RANGE;
-  const planeWorldY =
-    -smoothTiltRef.current.pitch * sensRef.current * PLANE_Y_RANGE;
-  const planeScreenX = cx + smoothTiltRef.current.roll * sensRef.current * 90;
+  // Use spring-damped world position (with smooth follow-through)
+  // and scale into screen space.  These are kept in world units in the
+  // motion model and projected here only for rendering.
+  const planeWorldX = planePosRef.current.x;
+  const planeWorldY = planePosRef.current.y;
+  const planeScreenX =
+    cx + (planeWorldX / PLANE_X_RANGE) * 90;
   const planeScreenY =
-    planeAnchorY + smoothTiltRef.current.pitch * sensRef.current * 70;
+    planeAnchorY + (-planeWorldY / PLANE_Y_RANGE) * 70;
+  // Visual bank/pitch from velocity (not raw tilt input).
+  const planeBankRoll = visualTiltRef.current.roll;
+  const planeBankPitch = visualTiltRef.current.pitch;
 
   const renderedObjects = objectsRef.current
     .filter((o) => !o.collected && o.z > 5 && o.z < FAR_Z)
@@ -572,6 +639,9 @@ export default function Game() {
 
   const tiltX = smoothTiltRef.current.roll;
   const tiltY = smoothTiltRef.current.pitch;
+  // For the parallax horizon, use the visual bank (smoother camera feel).
+  const camRoll = visualTiltRef.current.roll;
+  const camPitch = visualTiltRef.current.pitch;
   const speedPct = Math.min(
     1,
     Math.max(0, (speedRef.current - BRAKE_SPEED) / (BOOST_SPEED - BRAKE_SPEED))
@@ -589,16 +659,16 @@ export default function Game() {
         style={[
           styles.horizon,
           {
-            top: SH * 0.55 + tiltY * 30,
-            transform: [{ rotate: `${-tiltX * 6}deg` }],
+            top: SH * 0.55 + camPitch * 30,
+            transform: [{ rotate: `${-camRoll * 6}deg` }],
           },
         ]}
       />
 
       <ParallaxClouds
         offset={cloudOffsetRef.current}
-        tiltX={tiltX}
-        tiltY={tiltY}
+        tiltX={camRoll}
+        tiltY={camPitch}
         SW={SW}
         SH={SH}
       />
@@ -608,6 +678,35 @@ export default function Game() {
       </View>
 
       {boostActive && <BoostLines SW={SW} SH={SH} />}
+
+      {/* Plane trail (ghost positions) — gives a sense of speed and weight */}
+      {state === "playing" && (
+        <View style={[StyleSheet.absoluteFill, { pointerEvents: "none" }]}>
+          {trailRef.current.map((p, i) => {
+            const age = (performance.now() - p.t) / 360;
+            if (age >= 1) return null;
+            const opacity = (1 - age) * 0.32;
+            const tScale = 0.55 - age * 0.25;
+            const sx = cx + (p.x / PLANE_X_RANGE) * 90;
+            const sy = planeAnchorY + (-p.y / PLANE_Y_RANGE) * 70;
+            return (
+              <View
+                key={`trail-${i}-${p.t}`}
+                style={{
+                  position: "absolute",
+                  left: sx - (PLANE_SIZE * tScale) / 2,
+                  top: sy - (PLANE_SIZE * tScale) / 2,
+                  width: PLANE_SIZE * tScale,
+                  height: PLANE_SIZE * tScale,
+                  borderRadius: (PLANE_SIZE * tScale) / 2,
+                  backgroundColor: "#FFFFFF",
+                  opacity,
+                }}
+              />
+            );
+          })}
+        </View>
+      )}
 
       {/* Score popups */}
       <View style={[StyleSheet.absoluteFill, { pointerEvents: "none" }]}>
@@ -649,8 +748,8 @@ export default function Game() {
         <View style={styles.planeHalo} />
         <PaperPlane
           size={PLANE_SIZE}
-          tilt={tiltX}
-          pitch={-tiltY}
+          tilt={planeBankRoll}
+          pitch={-planeBankPitch}
           skinId={progress.equippedSkin}
           shimmerPhase={shimmerVal}
           flameTick={(shimmerVal * 5) % 1}
