@@ -18,7 +18,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { Accelerometer, DeviceMotion } from "expo-sensors";
 import * as Haptics from "expo-haptics";
 import PaperPlane from "../src/PaperPlane";
-import Cloud from "../src/Cloud";
 import {
   loadCalibration,
   saveCalibration,
@@ -33,44 +32,35 @@ import {
   DEFAULT_PROGRESS,
   RunResult,
 } from "../src/progression";
-import { SKINS, ACHIEVEMENTS, AchievementId, SkinId } from "../src/skins";
+import { SKINS, ACHIEVEMENTS } from "../src/skins";
 import { cratesEarnedForRun } from "../src/crates";
 import { submitDailyScore } from "../src/api";
 import { mulberry32, todaySeed, todaySeedString } from "../src/daily";
 import { playSfx, preloadSounds, loadSfxEnabled } from "../src/audio";
-
-// Map of which skins unlock from which achievement (kept here to avoid circular imports)
-const SKIN_BY_ACHIEVEMENT: Partial<Record<SkinId, AchievementId>> = {
-  mint: "rings_25",
-};
-const SKINS_BY_LEVEL: { id: SkinId; level: number }[] = [
-  { id: "skyblue", level: 3 },
-  { id: "crimson", level: 8 },
-];
-
-// World/projection constants
-const FOCAL = 320;
-const FAR_Z = 1100;
-const SPAWN_Z = 1000;
-const PLANE_SIZE = 76;
-const BASE_SPEED = 380;
-const BOOST_SPEED = 680;
-const BRAKE_SPEED = 180;
-const PLANE_X_RANGE = 220;
-const PLANE_Y_RANGE = 170;
-
-type WorldObj = {
-  id: number;
-  type: "ring" | "obstacle";
-  x: number;
-  y: number;
-  z: number;
-  baseSize: number;
-  collected?: boolean;
-  hue?: string;
-};
-
-type GameState = "ready" | "playing" | "paused" | "gameover";
+import {
+  FOCAL,
+  FAR_Z,
+  SPAWN_Z,
+  PLANE_SIZE,
+  BASE_SPEED,
+  BOOST_SPEED,
+  BRAKE_SPEED,
+  PLANE_X_RANGE,
+  PLANE_Y_RANGE,
+  SKIN_BY_ACHIEVEMENT,
+  SKINS_BY_LEVEL,
+  WorldObj,
+  GameState,
+} from "../src/game/constants";
+import {
+  applyDeadZone,
+  expFilterCoeff,
+  springStep,
+  smoothstep,
+} from "../src/game/physics";
+import TiltIndicator from "../src/game/components/TiltIndicator";
+import BoostLines from "../src/game/components/BoostLines";
+import ParallaxClouds from "../src/game/components/ParallaxClouds";
 
 let nextId = 1;
 
@@ -362,14 +352,6 @@ export default function Game() {
         const raw = rawTiltRef.current;
         const cal = calibRef.current;
 
-        // Apply dead zone to ignore micro-jitter (sensor noise / hand tremor)
-        const DEAD_ZONE = 0.06;
-        const applyDeadZone = (v: number) => {
-          if (Math.abs(v) < DEAD_ZONE) return 0;
-          const sign = v < 0 ? -1 : 1;
-          return sign * ((Math.abs(v) - DEAD_ZONE) / (1 - DEAD_ZONE));
-        };
-
         const rawRoll = applyDeadZone(raw.roll - cal.roll);
         const rawPitch = applyDeadZone(raw.pitch - cal.pitch);
         const targetRoll = Math.max(-1, Math.min(1, rawRoll));
@@ -377,34 +359,43 @@ export default function Game() {
 
         // Framerate-independent exponential smoothing of the *intent* tilt.
         // Lower tau = snappier, higher tau = creamier.  Roll is snappy, pitch slightly slower.
-        const TAU_ROLL = 0.09;
-        const TAU_PITCH = 0.13;
-        const aRoll = 1 - Math.exp(-dt / TAU_ROLL);
-        const aPitch = 1 - Math.exp(-dt / TAU_PITCH);
+        const aRoll = expFilterCoeff(dt, 0.09);
+        const aPitch = expFilterCoeff(dt, 0.13);
         smoothTiltRef.current.roll +=
           (targetRoll - smoothTiltRef.current.roll) * aRoll;
         smoothTiltRef.current.pitch +=
           (targetPitch - smoothTiltRef.current.pitch) * aPitch;
 
         // --- Flight dynamics: critically-damped spring on (x, y) world position ---
-        // Target world position from intent tilt.
         const tgtX =
           smoothTiltRef.current.roll * sensRef.current * PLANE_X_RANGE;
         const tgtY =
           -smoothTiltRef.current.pitch * sensRef.current * PLANE_Y_RANGE;
-        // Spring constants (per second).  Higher k = stiffer; tuned for flighty inertia.
-        const K_X = 80; // horizontal springiness
-        const K_Y = 65; // vertical (slightly softer for soft climb)
+        // Spring constants (per second).  Tuned for flighty inertia.
+        const K_X = 80;
+        const K_Y = 65;
         const D_X = 2 * Math.sqrt(K_X) * 0.9; // ~critically damped, slight underdamp
         const D_Y = 2 * Math.sqrt(K_Y) * 0.95;
-        const ax =
-          K_X * (tgtX - planePosRef.current.x) - D_X * planeVelRef.current.x;
-        const ay =
-          K_Y * (tgtY - planePosRef.current.y) - D_Y * planeVelRef.current.y;
-        planeVelRef.current.x += ax * dt;
-        planeVelRef.current.y += ay * dt;
-        planePosRef.current.x += planeVelRef.current.x * dt;
-        planePosRef.current.y += planeVelRef.current.y * dt;
+        const sx = springStep(
+          planePosRef.current.x,
+          planeVelRef.current.x,
+          tgtX,
+          dt,
+          K_X,
+          D_X
+        );
+        const sy = springStep(
+          planePosRef.current.y,
+          planeVelRef.current.y,
+          tgtY,
+          dt,
+          K_Y,
+          D_Y
+        );
+        planePosRef.current.x = sx.pos;
+        planePosRef.current.y = sy.pos;
+        planeVelRef.current.x = sx.vel;
+        planeVelRef.current.y = sy.vel;
 
         // Visual bank: derive roll/pitch from current screen-space velocity.
         // This makes the plane *lean into* turns and *pitch up* when climbing.
@@ -416,7 +407,7 @@ export default function Game() {
           -1,
           Math.min(1, -planeVelRef.current.y / 220)
         );
-        const aVis = 1 - Math.exp(-dt / 0.08);
+        const aVis = expFilterCoeff(dt, 0.08);
         visualTiltRef.current.roll +=
           (visRollTarget - visualTiltRef.current.roll) * aVis;
         visualTiltRef.current.pitch +=
@@ -593,7 +584,8 @@ export default function Game() {
       const sy =
         planeAnchorY + (o.y - planeWorldY * 0.4) * scale - (1 - scale) * 80;
       const size = o.baseSize * scale;
-      const opacity = Math.min(1, (FAR_Z - o.z) / 600);
+      // Smoother cubic fade-in: things ease in from far rather than popping.
+      const opacity = smoothstep((FAR_Z - o.z) / 650);
       if (o.type === "ring") {
         const pulse = 1 + Math.sin(performance.now() / 220 + o.id) * 0.06;
         const rsize = size * pulse;
@@ -1065,93 +1057,6 @@ function Overlay({
   return (
     <View style={[styles.overlayWrap, { pointerEvents: "box-none" }]}>
       <View style={[styles.overlayPanel, { width: SW - 60 }]}>{children}</View>
-    </View>
-  );
-}
-
-function TiltIndicator({ tiltX, tiltY }: { tiltX: number; tiltY: number }) {
-  const dotX = 22 + tiltX * 18;
-  const dotY = 22 + tiltY * 18;
-  return (
-    <View style={styles.tiltIndicator} testID="tilt-indicator">
-      <View style={styles.tiltCross} />
-      <View style={styles.tiltCrossV} />
-      <View style={[styles.tiltDot, { left: dotX - 6, top: dotY - 6 }]} />
-    </View>
-  );
-}
-
-function BoostLines({ SW, SH }: { SW: number; SH: number }) {
-  const lines = Array.from({ length: 10 });
-  return (
-    <View style={[StyleSheet.absoluteFill, { pointerEvents: "none" }]}>
-      {lines.map((_, i) => {
-        const side = i % 2 === 0 ? -1 : 1;
-        const top = 60 + ((i * 73) % (SH - 200));
-        return (
-          <View
-            key={i}
-            style={[
-              styles.boostLine,
-              {
-                top,
-                left: side === -1 ? 10 : SW - 90,
-                opacity: 0.55,
-              },
-            ]}
-          />
-        );
-      })}
-    </View>
-  );
-}
-
-function ParallaxClouds({
-  offset,
-  tiltX,
-  tiltY,
-  SW,
-  SH,
-}: {
-  offset: number;
-  tiltX: number;
-  tiltY: number;
-  SW: number;
-  SH: number;
-}) {
-  const layers = [
-    { speed: 0.4, y: SH * 0.15, size: 110, count: 4, opacity: 0.55 },
-    { speed: 0.7, y: SH * 0.32, size: 80, count: 5, opacity: 0.7 },
-    { speed: 1.0, y: SH * 0.78, size: 130, count: 3, opacity: 0.8 },
-  ];
-  return (
-    <View style={[StyleSheet.absoluteFill, { pointerEvents: "none" }]}>
-      {layers.map((layer, li) =>
-        Array.from({ length: layer.count }).map((_, i) => {
-          const spacing = SW / layer.count + 80;
-          const baseX =
-            i * spacing - ((offset * layer.speed) % (SW + 200)) - 100;
-          const x = baseX - tiltX * 30 * layer.speed;
-          const y = layer.y - tiltY * 20 * layer.speed;
-          return (
-            <View
-              key={`${li}-${i}`}
-              style={[
-                styles.cloud,
-                {
-                  width: layer.size,
-                  height: layer.size * 0.45,
-                  borderRadius: layer.size,
-                  left:
-                    ((x % (SW + 200)) + (SW + 200)) % (SW + 200) - 100,
-                  top: y,
-                  opacity: layer.opacity,
-                },
-              ]}
-            />
-          );
-        })
-      )}
     </View>
   );
 }
